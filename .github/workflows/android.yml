@@ -1,0 +1,57 @@
+name: Android-APK bauen
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'README.md'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Abhängigkeiten installieren
+        run: npm ci
+
+      - name: Web-App in Android-Projekt kopieren
+        run: npx cap sync android
+
+      - name: APK bauen
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: APK umbenennen
+        run: cp android/app/build/outputs/apk/release/app-release.apk geld.apk
+
+      - name: APK als Download bereitstellen
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-neueste
+          name: Geld – Android-App (APK)
+          body: |
+            Die aktuelle Android-App. Auf dem Handy `geld.apk` antippen und installieren.
+            Stand: Build Nr. ${{ github.run_number }}
+          files: geld.apk
+          make_latest: true

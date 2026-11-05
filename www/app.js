@@ -947,6 +947,11 @@ function shareStatus(p) {
   if (entries.length) {
     text += '\n\nZuletzt:\n' + entries.map((d) => `• ${d.type === 'pay' ? 'Zahlung' : d.text} – ${d.type === 'pay' ? '+' : ''}${eur(d.amount)} (${dateLabel(d.date)})`).join('\n');
   }
+  const nativeShare = native() ? plugin('Share') : null;
+  if (nativeShare) {
+    nativeShare.share({ text, dialogTitle: 'Stand teilen' }).catch(() => {});
+    return;
+  }
   if (navigator.share) {
     navigator.share({ text }).catch(() => {});
     return;
@@ -1083,9 +1088,26 @@ function resizeImage(file, size) {
   });
 }
 
+/* In der Android-App (Capacitor) gibt es echte Datei- und Teilen-Funktionen */
+const native = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+const plugin = (n) => (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins[n]) || null;
+
+async function exportBackupNative() {
+  const FS = plugin('Filesystem'); const Share = plugin('Share');
+  if (!FS || !Share) throw new Error('plugin');
+  const name = `geld-backup-${todayStr()}.json`;
+  const res = await FS.writeFile({ path: name, data: JSON.stringify(S, null, 1), directory: 'CACHE', encoding: 'utf8' });
+  await Share.share({ title: 'Geld-Backup', files: [res.uri], dialogTitle: 'Backup speichern unter …' });
+}
+
 function exportBackup() {
   S.settings.lastBackup = Date.now();
   save();
+  if (native()) {
+    exportBackupNative().then(() => { toast('Backup erstellt'); render(); })
+      .catch((e) => { if (!/cancel/i.test(String(e && e.message))) toast('Backup konnte nicht gespeichert werden'); });
+    return;
+  }
   const blob = new Blob([JSON.stringify(S, null, 1)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -1291,6 +1313,9 @@ document.addEventListener('visibilitychange', () => {
 });
 render();
 
-if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+if (native()) {
+  // In der APK sind alle Dateien eingebaut – kein Service Worker nötig (und keine veralteten Dateien nach Updates)
+  if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister())).catch(() => {});
+} else if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 }

@@ -1,0 +1,8 @@
+{
+  "appId": "de.pasci.geld",
+  "appName": "Geld",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#EAF2EC"
+  }
+}
