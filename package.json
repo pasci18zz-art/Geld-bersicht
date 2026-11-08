@@ -5,6 +5,7 @@
   "description": "Geld – Budget & Schulden (Android-App)",
   "dependencies": {
     "@capacitor/android": "^8.1.5",
+    "@capacitor/app": "^8.1.2",
     "@capacitor/core": "^8.1.5",
     "@capacitor/filesystem": "^8.0.3",
     "@capacitor/share": "^8.0.0"

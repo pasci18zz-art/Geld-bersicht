@@ -658,22 +658,32 @@ function recurringSheet(id) {
 }
 
 /* Ausgabe eintragen / bearbeiten */
+/** Summe und Text eines Lidl-Warenkorbs (Menge je Snack) */
+function cartInfo(cart) {
+  let sum = 0; let count = 0; const parts = [];
+  S.products.forEach((pr) => { const q = cart[pr.id] || 0; if (q) { sum += q * pr.price; count += q; parts.push((q > 1 ? q + '× ' : '') + pr.name); } });
+  return { sum, count, parts };
+}
+
 VIEWS.ausgabe = {
   nav: null,
   init(arg) {
-    const id = arg && arg !== 'einnahme' ? arg : null;
+    const id = arg && arg !== 'einnahme' && arg !== 'lidl' ? arg : null;
     const inc = id ? S.income.find((x) => x.id === id) : null;
     const e = inc || (id ? S.expenses.find((x) => x.id === id) : null);
-    const kind = inc || arg === 'einnahme' ? 'in' : 'out';
+    const kind = inc || arg === 'einnahme' ? 'in' : arg === 'lidl' ? 'lidl' : 'out';
     const firstAcc = S.accounts[0] ? S.accounts[0].id : null;
+    const foodAcc = (S.accounts.find((x) => /essen|snack|lebensmittel/i.test(x.name)) || {}).id || firstAcc;
     draft = e
-      ? { id: e.id, kind, amt: centsToInput(e.amount), acc: e.accountId || firstAcc, note: e.note || '', date: e.date, share: false, person: null }
-      : { id: null, kind, amt: '', acc: firstAcc, note: '', date: todayStr(), share: false, person: null };
+      ? { id: e.id, kind, amt: centsToInput(e.amount), acc: e.accountId || firstAcc, note: e.note || '', date: e.date, share: false, person: null, cart: {} }
+      : { id: null, kind, amt: '', acc: kind === 'lidl' ? foodAcc : firstAcc, note: '', date: todayStr(), share: false, person: null, cart: {} };
   },
   html() {
     const d = draft;
     const isIn = d.kind === 'in';
-    const amount = parseEur(d.amt);
+    const isLidl = d.kind === 'lidl' && !d.id;
+    const ci = cartInfo(d.cart || {});
+    const amount = isLidl ? ci.sum : parseEur(d.amt);
     let hint = '&nbsp;';
     if (isIn) hint = 'Kommt auf dein Konto dazu.';
     else if (d.share) hint = 'Zählt nicht zu deinem Budget – du bekommst es ja zurück.';
@@ -684,15 +694,54 @@ VIEWS.ausgabe = {
       hint = esc(a.name) + (rest < 0 ? ': danach ' + eur(-rest) + ' drüber' : ': danach noch ' + eur(rest) + ' übrig');
     }
     const people = S.people.map((p) => `<button class="chip${d.person === p.id ? ' on' : ''}" data-person-pick="${p.id}" role="radio" aria-checked="${d.person === p.id}">${esc(p.name)}</button>`).join('');
+    const seg = d.id ? '' : `<div class="chips center" role="radiogroup" aria-label="Art der Buchung">
+        <button class="chip${!isIn && !isLidl ? ' on' : ''}" data-kind="out" role="radio" aria-checked="${!isIn && !isLidl}">Ausgabe</button>
+        <button class="chip${isLidl ? ' on' : ''}" data-kind="lidl" role="radio" aria-checked="${isLidl}">Lidl</button>
+        <button class="chip${isIn ? ' on' : ''}" data-kind="in" role="radio" aria-checked="${isIn}">Einnahme</button></div>`;
+    if (isLidl) {
+      const prods = S.products.slice().sort((a, b) => (b.fav ? 1 : 0) - (a.fav ? 1 : 0));
+      const tiles = prods.map((pr) => {
+        const q = d.cart[pr.id] || 0;
+        return `<div class="tile">
+          <button class="tile-main${q ? ' on' : ''}" data-add="${pr.id}" aria-label="${esc(pr.name)}, ${eur(pr.price)}${q ? ', ' + q + ' ausgewählt' : ''}">
+            <span class="tile-img">${productVisual(pr)}</span>
+            <span class="tile-name">${esc(pr.name)}</span>
+            <span class="tile-price">${eur(pr.price)}</span>
+          </button>
+          ${pr.fav ? svg('star', 'class="fav"') : ''}
+          ${q ? `<span class="qty">${q}×</span><button class="less" data-less="${pr.id}" aria-label="Ein ${esc(pr.name)} weniger">−</button>` : ''}
+        </div>`;
+      }).join('');
+      const label = ci.count ? ci.count + (ci.count === 1 ? ' Teil' : ' Teile') : 'Noch nichts ausgewählt';
+      return `<div class="page withbar">
+        <div class="topbar">
+          <button class="icon-btn" id="close" aria-label="Schließen">${svg('close')}</button>
+          <h1 class="center">Lidl – für mich</h1>
+          <span style="width:44px"></span>
+        </div>
+        ${seg}
+        <p class="small" style="margin:0 2px;text-align:center">Tippe an, was du dir geholt hast. ${amount > 0 ? hint : ''}</p>
+        <div class="chips center" role="radiogroup" aria-label="Konto">${S.accounts.map((a) =>
+    `<button class="chip${d.acc === a.id ? ' on' : ''}" data-acc="${a.id}" role="radio" aria-checked="${d.acc === a.id}">${esc(a.name)}</button>`).join('')}</div>
+        <div class="grid3">${tiles}</div>
+        <div style="display:flex;gap:8px">
+          <label class="field grow">${svg('pen')}<span class="sr">Notiz</span><input id="note" placeholder="Notiz (optional)" value="${esc(d.note)}" maxlength="60"></label>
+          <label class="field" style="padding:0 10px;flex:0 0 auto"><span class="sr">Datum</span><input id="date" type="date" value="${d.date}" max="${todayStr()}" style="font-size:14px;max-width:132px"></label>
+        </div>
+      </div>
+      <div class="bottombar">
+        <div class="grow"><div class="small b">${label}</div><div style="font-size:20px;font-weight:800">${eur(ci.sum)}</div></div>
+        <button class="link" id="clear">Leeren</button>
+        <button class="btn" id="save" ${ci.sum > 0 ? '' : 'disabled'}>Speichern</button>
+      </div>`;
+    }
     return `<div class="page nonav">
       <div class="topbar">
         <button class="icon-btn" id="close" aria-label="Schließen">${svg('close')}</button>
         <h1 class="center">${d.id ? (isIn ? 'Einnahme bearbeiten' : 'Ausgabe bearbeiten') : (isIn ? 'Neue Einnahme' : 'Neue Ausgabe')}</h1>
         ${d.id ? `<button class="icon-btn" id="del" aria-label="Löschen" style="color:var(--minus)">${svg('trash')}</button>` : '<span style="width:44px"></span>'}
       </div>
-      ${d.id ? '' : `<div class="chips center" role="radiogroup" aria-label="Art der Buchung">
-        <button class="chip${isIn ? '' : ' on'}" data-kind="out" role="radio" aria-checked="${!isIn}">Ausgabe</button>
-        <button class="chip${isIn ? ' on' : ''}" data-kind="in" role="radio" aria-checked="${isIn}">Einnahme</button></div>`}
+      ${seg}
       <div><div class="amount ${isIn ? 'plus' : ''}" aria-live="polite">${isIn ? '+' : ''}${esc(d.amt || '0')} €</div><div class="small" style="text-align:center">${hint}</div></div>
       ${d.share || isIn ? '' : `<div class="chips center" role="radiogroup" aria-label="Konto">${S.accounts.map((a) =>
     `<button class="chip${d.acc === a.id ? ' on' : ''}" data-acc="${a.id}" role="radio" aria-checked="${d.acc === a.id}">${esc(a.name)}</button>`).join('')}</div>`}
@@ -710,7 +759,15 @@ VIEWS.ausgabe = {
     const d = draft;
     const isIn = d.kind === 'in';
     $('#close').onclick = () => back('uebersicht');
-    $$('[data-kind]').forEach((b) => b.onclick = () => { d.kind = b.dataset.kind; if (d.kind === 'in') d.share = false; render(); });
+    $$('[data-kind]').forEach((b) => b.onclick = () => {
+      d.kind = b.dataset.kind;
+      if (d.kind !== 'out') d.share = false;
+      if (d.kind === 'lidl') { const a = S.accounts.find((x) => /essen|snack|lebensmittel/i.test(x.name)); if (a) d.acc = a.id; }
+      render();
+    });
+    $$('[data-add]').forEach((b) => b.onclick = () => { d.cart[b.dataset.add] = (d.cart[b.dataset.add] || 0) + 1; render(); });
+    $$('[data-less]').forEach((b) => b.onclick = () => { const k = b.dataset.less; d.cart[k] = Math.max(0, (d.cart[k] || 0) - 1); render(); });
+    if ($('#clear')) $('#clear').onclick = () => { d.cart = {}; d.note = ''; render(); };
     $$('.key').forEach((k) => k.onclick = () => { d.amt = pressKey(d.amt, k.dataset.key); render(); });
     $$('[data-acc]').forEach((b) => b.onclick = () => { d.acc = b.dataset.acc; render(); });
     $$('[data-person-pick]').forEach((b) => b.onclick = () => { d.person = b.dataset.personPick; render(); });
@@ -730,6 +787,15 @@ VIEWS.ausgabe = {
       }, { after: () => back('uebersicht') });
     };
     $('#save').onclick = () => {
+      if (d.kind === 'lidl' && !d.id) {
+        const ci = cartInfo(d.cart);
+        if (ci.sum <= 0) return;
+        const note = d.note.trim() || ci.parts.join(', ');
+        commit(`${eur(ci.sum)} eingetragen`, () => {
+          S.expenses.push({ id: uid(), amount: ci.sum, accountId: d.acc, note, date: d.date, ts: Date.now() });
+        }, { after: () => { if (monthOf(d.date) !== viewMonth) viewMonth = monthOf(d.date); back('uebersicht'); } });
+        return;
+      }
       const amount = parseEur(d.amt);
       if (amount <= 0) return;
       if (isIn) {
@@ -1474,6 +1540,32 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 render();
+
+/* Haupt-Tabs (unten) ersetzen die aktuelle Seite statt sie zu stapeln – so führt „Zurück“ nicht durch alle Tabs */
+$$('#nav a:not(.add)').forEach((a) => a.addEventListener('click', (e) => {
+  const target = a.getAttribute('href');
+  if (location.hash === target) { e.preventDefault(); return; }
+  e.preventDefault();
+  replacing = true;
+  location.replace(target);
+}));
+
+/** Zurück-Taste / Zurück-Geste (Android): offenes Fenster schließen → eine Seite zurück → zur Startseite → App schließen */
+function handleBack() {
+  if ($('#sheet-root').firstElementChild) { closeSheet(); return true; }
+  const r = route();
+  if (stack.length > 1) { history.back(); return true; }
+  if (r.name !== homeName() || r.arg) { replacing = true; location.replace('#/' + homeName()); return true; }
+  return false;
+}
+if (native()) {
+  const AppPlugin = plugin('App');
+  if (AppPlugin && AppPlugin.addListener) {
+    AppPlugin.addListener('backButton', () => {
+      if (!handleBack()) { try { AppPlugin.exitApp(); } catch (e) { /* nichts */ } }
+    });
+  }
+}
 
 if (native()) {
   // In der APK sind alle Dateien eingebaut – kein Service Worker nötig (und keine veralteten Dateien nach Updates)
