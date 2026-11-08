@@ -249,6 +249,58 @@ button.row { width: 100%; background: none; border: none; text-align: left; colo
 .imp-row select { max-width: 100%; margin-top: 6px; border-radius: 12px; border: 1px solid var(--border); background: var(--chip); color: var(--text); padding: 6px 8px; font-size: 13px; font-weight: 600; }
 .imp-row.dup { opacity: 0.55; }
 
+/* ---------- Animationen ---------- */
+@keyframes inR { from { transform: translateX(44px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes inL { from { transform: translateX(-44px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes inFwd { from { transform: translateX(60px) scale(.985); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes inBack { from { transform: translateX(-34px) scale(.99); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes inFade { from { transform: scale(.985); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes rise { from { transform: translateY(16px) scale(.97); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes fadeOnly { from { opacity: 0; } to { opacity: 1; } }
+@keyframes grow { from { width: 0; } }
+@keyframes ring { from { stroke-dasharray: 0 276.5; } }
+@keyframes down { to { transform: translateY(60px); opacity: 0; } }
+@keyframes fadeOut { to { opacity: 0; } }
+
+#view.in-r .page { animation: inR .32s cubic-bezier(.2,.8,.2,1) both; }
+#view.in-l .page { animation: inL .32s cubic-bezier(.2,.8,.2,1) both; }
+#view.in-fwd .page { animation: inFwd .34s cubic-bezier(.2,.8,.2,1) both; }
+#view.in-back .page { animation: inBack .3s cubic-bezier(.2,.8,.2,1) both; }
+#view.in-fade .page { animation: inFade .28s ease-out both; }
+#view.anim .bottombar { animation: fadeOnly .35s ease-out .1s both; }
+
+/* Karten erscheinen nacheinander */
+#view.anim .page > * { animation: rise .45s cubic-bezier(.2,.8,.2,1) both; }
+#view.anim .page > *:nth-child(1) { animation-delay: .02s; }
+#view.anim .page > *:nth-child(2) { animation-delay: .06s; }
+#view.anim .page > *:nth-child(3) { animation-delay: .10s; }
+#view.anim .page > *:nth-child(4) { animation-delay: .14s; }
+#view.anim .page > *:nth-child(5) { animation-delay: .18s; }
+#view.anim .page > *:nth-child(6) { animation-delay: .22s; }
+#view.anim .page > *:nth-child(n+7) { animation-delay: .26s; }
+/* Personen-Karten und Snack-Kacheln poppen leicht nacheinander auf */
+#view.anim .grid2 > *, #view.anim .grid3 > * { animation: rise .45s cubic-bezier(.2,.8,.2,1) both; }
+#view.anim .grid2 > *:nth-child(1), #view.anim .grid3 > *:nth-child(1) { animation-delay: .12s; }
+#view.anim .grid2 > *:nth-child(2), #view.anim .grid3 > *:nth-child(2) { animation-delay: .16s; }
+#view.anim .grid2 > *:nth-child(3), #view.anim .grid3 > *:nth-child(3) { animation-delay: .20s; }
+#view.anim .grid2 > *:nth-child(4), #view.anim .grid3 > *:nth-child(4) { animation-delay: .24s; }
+#view.anim .grid2 > *:nth-child(5), #view.anim .grid3 > *:nth-child(5) { animation-delay: .28s; }
+#view.anim .grid2 > *:nth-child(n+6), #view.anim .grid3 > *:nth-child(n+6) { animation-delay: .32s; }
+/* Balken und Ring wachsen */
+#view.anim .bar > i { animation: grow .8s cubic-bezier(.2,.8,.2,1) .15s both; }
+#view.anim svg circle:nth-of-type(2) { animation: ring 1s cubic-bezier(.2,.8,.2,1) .1s both; }
+
+/* Fenster schließen weich */
+.sheet-backdrop.closing { animation: fadeOut .18s ease-in both; pointer-events: none; }
+.sheet-backdrop.closing .sheet { animation: down .19s ease-in both; }
+
+/* Weiches Antippen */
+.btn, .chip, .key, .icon-btn, .row, .toggle-row { transition: transform .12s ease, background-color .15s ease, opacity .15s ease; }
+.btn:active, .chip:active, .key:active, .icon-btn:active, .toggle-row:active { transform: scale(.96); }
+.row:active { opacity: .6; }
+#nav a { transition: background-color .2s ease, color .2s ease, transform .12s ease; }
+#nav a:active { transform: scale(.9); }
+
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }

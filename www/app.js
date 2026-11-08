@@ -258,16 +258,18 @@ function route() {
   return { name: decodeURIComponent(name), arg: arg ? decodeURIComponent(arg) : '' };
 }
 function go(path) { location.hash = '#/' + path; }
+/** Richtung der nächsten Seitenanimation: 'fwd' | 'back' | 'tab-l' | 'tab-r' | 'fade' */
+let navDir = null;
 function back(fallback) {
   if (stack.length > 1) history.back();
-  else { replacing = true; location.replace('#/' + fallback); }
+  else { replacing = true; navDir = 'back'; location.replace('#/' + fallback); }
 }
 window.addEventListener('hashchange', () => {
   const h = location.hash;
-  if (replacing) { stack[stack.length - 1] = h; replacing = false; }
-  else if (stack.length > 1 && stack[stack.length - 2] === h) stack.pop();
-  else stack.push(h);
-  closeSheet();
+  if (replacing) { stack[stack.length - 1] = h; replacing = false; navDir = navDir || 'fade'; }
+  else if (stack.length > 1 && stack[stack.length - 2] === h) { stack.pop(); navDir = 'back'; }
+  else { stack.push(h); navDir = 'fwd'; }
+  closeSheetNow();
   render();
   window.scrollTo(0, 0);
 });
@@ -293,7 +295,16 @@ function openSheet(html, mount) {
   $$('[data-close]', root).forEach((b) => b.addEventListener('click', closeSheet));
   if (mount) mount($('.sheet', root));
 }
-function closeSheet() { $('#sheet-root').innerHTML = ''; }
+/** Sofort schließen (z. B. beim Seitenwechsel) */
+function closeSheetNow() { $('#sheet-root').innerHTML = ''; }
+/** Weich ausblenden; ein inzwischen neu geöffnetes Fenster bleibt unberührt */
+function closeSheet() {
+  const root = $('#sheet-root');
+  const node = root.firstElementChild;
+  if (!node || node.classList.contains('closing')) return;
+  node.classList.add('closing');
+  setTimeout(() => { if (root.firstElementChild === node) root.innerHTML = ''; }, 190);
+}
 function confirmSheet(title, text, okText, onOk) {
   openSheet(`<h2>${esc(title)}</h2><p class="muted" style="margin:0">${esc(text)}</p>
     <div class="actions"><button class="btn ghost" data-close>Abbrechen</button><button class="btn danger" id="ok">${esc(okText)}</button></div>`,
@@ -1515,12 +1526,24 @@ function render() {
   const r = route();
   const v = VIEWS[r.name] || VIEWS.uebersicht;
   const key = r.name + '/' + r.arg;
-  if (key !== lastRouteKey) {
+  const changed = key !== lastRouteKey;
+  if (changed) {
     lastRouteKey = key;
     if (r.name !== 'konten') editBudget = null;
     if (v.init) v.init(r.arg);
   }
-  $('#view').innerHTML = v.html(r.arg);
+  const view = $('#view');
+  // Animationen nur beim Seitenwechsel – nicht bei jedem Antippen innerhalb einer Seite
+  view.className = '';
+  view.innerHTML = v.html(r.arg);
+  if (changed) {
+    const cls = { fwd: 'in-fwd', back: 'in-back', 'tab-l': 'in-r', 'tab-r': 'in-l', fade: 'in-fade' }[navDir] || 'in-fade';
+    void view.offsetWidth;
+    view.className = 'anim ' + cls;
+    clearTimeout(render._t);
+    render._t = setTimeout(() => { view.className = ''; }, 700);
+  }
+  navDir = null;
   if (v.mount) v.mount(r.arg);
   const nav = $('#nav');
   nav.classList.toggle('hidden', !v.nav);
@@ -1544,18 +1567,85 @@ render();
 /* Haupt-Tabs (unten) ersetzen die aktuelle Seite statt sie zu stapeln – so führt „Zurück“ nicht durch alle Tabs */
 $$('#nav a:not(.add)').forEach((a) => a.addEventListener('click', (e) => {
   const target = a.getAttribute('href');
-  if (location.hash === target) { e.preventDefault(); return; }
   e.preventDefault();
+  if (location.hash === target) return;
+  const from = TABS.indexOf((VIEWS[route().name] || {}).nav || '');
+  const to = TABS.indexOf(a.dataset.tab);
+  navDir = from >= 0 && to >= 0 && to !== from ? (to > from ? 'tab-l' : 'tab-r') : 'fade';
   replacing = true;
   location.replace(target);
 }));
+
+/* ---------- Wischen zwischen den Haupt-Seiten ---------- */
+const TABS = ['uebersicht', 'konten', 'schulden']; // Reihenfolge wie in der Leiste unten
+let sw = null;
+const viewEl = () => $('#view');
+function swipeTo(dir) { // dir: -1 = zurück (nach rechts wischen), +1 = weiter
+  const r = route();
+  const i = TABS.indexOf(r.name);
+  const t = i + dir;
+  if (i < 0 || t < 0 || t >= TABS.length) return false;
+  navDir = dir > 0 ? 'tab-l' : 'tab-r';
+  replacing = true;
+  location.replace('#/' + TABS[t]);
+  return true;
+}
+document.addEventListener('touchstart', (e) => {
+  sw = null;
+  if (e.touches.length !== 1 || $('#sheet-root').firstElementChild) return;
+  const r = route();
+  if (!TABS.includes(r.name) || r.arg) return;
+  if (e.target.closest && e.target.closest('input, select, textarea, [data-no-swipe]')) return;
+  const t = e.touches[0];
+  sw = { x: t.clientX, y: t.clientY, t: Date.now(), lock: null, dx: 0 };
+}, { passive: true });
+document.addEventListener('touchmove', (e) => {
+  if (!sw) return;
+  const t = e.touches[0];
+  const dx = t.clientX - sw.x; const dy = t.clientY - sw.y;
+  if (sw.lock === null) {
+    if (Math.hypot(dx, dy) < 12) return;
+    sw.lock = Math.abs(dx) > Math.abs(dy) * 1.4 ? 'h' : 'v';
+  }
+  if (sw.lock !== 'h') return;
+  if (e.cancelable) e.preventDefault();
+  sw.dx = dx;
+  const i = TABS.indexOf(route().name);
+  const has = i + (dx < 0 ? 1 : -1) >= 0 && i + (dx < 0 ? 1 : -1) < TABS.length;
+  const v = viewEl();
+  v.style.transition = 'none';
+  v.style.transform = `translateX(${dx * (has ? 0.45 : 0.12)}px)`;
+  v.style.opacity = String(1 - Math.min(Math.abs(dx), 300) / (has ? 700 : 1500));
+}, { passive: false });
+function endSwipe() {
+  const s = sw; sw = null;
+  if (!s || s.lock !== 'h') return;
+  const v = viewEl();
+  const dx = s.dx; const fast = Date.now() - s.t < 260;
+  const go = Math.abs(dx) > 80 || (Math.abs(dx) > 40 && fast);
+  const dir = dx < 0 ? 1 : -1;
+  const i = TABS.indexOf(route().name);
+  const ok = go && i + dir >= 0 && i + dir < TABS.length;
+  v.style.transition = ok ? 'transform .14s ease-in, opacity .14s ease-in' : 'transform .25s cubic-bezier(.2,.8,.2,1), opacity .25s';
+  if (ok) {
+    v.style.transform = `translateX(${dx < 0 ? -48 : 48}px)`;
+    v.style.opacity = '0';
+    if (navigator.vibrate) navigator.vibrate(8);
+    setTimeout(() => { v.style.transition = ''; v.style.transform = ''; v.style.opacity = ''; swipeTo(dir); }, 140);
+  } else {
+    v.style.transform = ''; v.style.opacity = '';
+    setTimeout(() => { v.style.transition = ''; }, 260);
+  }
+}
+document.addEventListener('touchend', endSwipe, { passive: true });
+document.addEventListener('touchcancel', endSwipe, { passive: true });
 
 /** Zurück-Taste / Zurück-Geste (Android): offenes Fenster schließen → eine Seite zurück → zur Startseite → App schließen */
 function handleBack() {
   if ($('#sheet-root').firstElementChild) { closeSheet(); return true; }
   const r = route();
   if (stack.length > 1) { history.back(); return true; }
-  if (r.name !== homeName() || r.arg) { replacing = true; location.replace('#/' + homeName()); return true; }
+  if (r.name !== homeName() || r.arg) { replacing = true; navDir = 'back'; location.replace('#/' + homeName()); return true; }
   return false;
 }
 if (native()) {
