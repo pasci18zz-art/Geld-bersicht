@@ -832,6 +832,37 @@ VIEWS.ausgabe = {
   }
 };
 
+/* Schnell-Auswahl: „Wer?“ – kommt von den Aktionen (Sperrbildschirm / App-Kurzbefehle) */
+VIEWS.schnell = {
+  nav: null,
+  html(kind) {
+    const pay = kind === 'zahlung';
+    const cards = S.people.map((p) => {
+      const l = look(saldo(p.id));
+      return `<button class="pcard" data-pick="${p.id}" aria-label="${esc(p.name)}, ${l.text}">
+        <div style="display:flex;align-items:center;gap:10px;width:100%">
+          <span class="avatar" style="background:${p.color}" aria-hidden="true">${esc(p.name.charAt(0).toUpperCase())}</span>
+          <span class="pname grow ell">${esc(p.name)}</span>
+        </div>
+        <span class="psaldo ${l.cls}">${l.text}</span>
+      </button>`;
+    }).join('');
+    return `<div class="page nonav">
+      <div class="topbar">
+        <button class="icon-btn" id="back" aria-label="Zurück">${svg('back')}</button>
+        <h1>${pay ? 'Wer hat bezahlt?' : 'Wer hat etwas bekommen?'}</h1>
+      </div>
+      ${S.people.length ? `<div class="grid2">${cards}</div>`
+    : `<div class="card empty">${svg('people')}<div>Noch niemand hier.</div><button class="btn" id="add-first" style="margin-top:14px">Erste Person anlegen</button></div>`}
+    </div>`;
+  },
+  mount(kind) {
+    $('#back').onclick = () => back('schulden');
+    if ($('#add-first')) $('#add-first').onclick = () => personSheet(null);
+    $$('[data-pick]').forEach((b) => b.onclick = () => goReplace((kind === 'zahlung' ? 'zahlung/' : 'mitbringen/') + b.dataset.pick));
+  }
+};
+
 /* Schulden – Personenkarten */
 VIEWS.schulden = {
   nav: 'schulden',
@@ -1569,7 +1600,7 @@ function onResume() {
   hiddenAt = 0;
   applyRecurring();
   if (viewMonth > curMonth()) viewMonth = curMonth();
-  if (S.settings.jumpHome !== false && away > AWAY_MS) {
+  if (S.settings.jumpHome !== false && away > AWAY_MS && Date.now() - actionAt > 3000) {
     const r = route();
     if (r.name !== homeName() || r.arg) {
       closeSheetNow();
@@ -1689,6 +1720,25 @@ function endSwipe(e) {
   v.addEventListener('pointercancel', endSwipe, { passive: true });
 }
 
+/** Seite ersetzen statt stapeln (z. B. von der „Wer?“-Auswahl in die Eingabe) */
+function goReplace(path, dir) {
+  if (location.hash === '#/' + path) { render(); return; }
+  replacing = true; navDir = dir || 'fwd';
+  location.replace('#/' + path);
+}
+/** Aktionen von außen (App-Kurzbefehle, z. B. auf dem Sperrbildschirm): geld://mitbringen | zahlung | ausgabe | lidl */
+let actionAt = 0;
+function handleActionUrl(url) {
+  const m = /^geld:\/\/([a-z]+)/i.exec(url || '');
+  if (!m) return;
+  const path = { mitbringen: 'schnell/mitbringen', zahlung: 'schnell/zahlung', ausgabe: 'ausgabe', lidl: 'ausgabe/lidl' }[m[1].toLowerCase()];
+  if (!path) return;
+  actionAt = Date.now();
+  closeSheetNow();
+  stack.splice(0, stack.length - 1); // „Zurück“ führt danach zur Startseite und dann aus der App
+  goReplace(path, 'fwd');
+}
+
 /** Zurück-Taste / Zurück-Geste (Android): offenes Fenster schließen → eine Seite zurück → zur Startseite → App schließen */
 function handleBack() {
   if ($('#sheet-root').firstElementChild) { closeSheet(); return true; }
@@ -1704,6 +1754,8 @@ if (native()) {
       if (!handleBack()) { try { AppPlugin.exitApp(); } catch (e) { /* nichts */ } }
     });
     AppPlugin.addListener('appStateChange', (st) => { if (st && st.isActive) onResume(); else onLeave(); });
+    AppPlugin.addListener('appUrlOpen', (e) => handleActionUrl(e && e.url));
+    if (AppPlugin.getLaunchUrl) AppPlugin.getLaunchUrl().then((r) => { if (r && r.url) handleActionUrl(r.url); }).catch(() => { /* kein Start über eine Aktion */ });
   }
 }
 

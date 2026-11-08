@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="bring"
+        android:enabled="true"
+        android:icon="@drawable/ic_sc_bring"
+        android:shortcutShortLabel="@string/sc_bring_short"
+        android:shortcutLongLabel="@string/sc_bring_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="de.pasci.geld"
+            android:targetClass="de.pasci.geld.MainActivity"
+            android:data="geld://mitbringen" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="pay"
+        android:enabled="true"
+        android:icon="@drawable/ic_sc_pay"
+        android:shortcutShortLabel="@string/sc_pay_short"
+        android:shortcutLongLabel="@string/sc_pay_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="de.pasci.geld"
+            android:targetClass="de.pasci.geld.MainActivity"
+            android:data="geld://zahlung" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="expense"
+        android:enabled="true"
+        android:icon="@drawable/ic_sc_expense"
+        android:shortcutShortLabel="@string/sc_expense_short"
+        android:shortcutLongLabel="@string/sc_expense_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="de.pasci.geld"
+            android:targetClass="de.pasci.geld.MainActivity"
+            android:data="geld://ausgabe" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="lidl"
+        android:enabled="true"
+        android:icon="@drawable/ic_sc_lidl"
+        android:shortcutShortLabel="@string/sc_lidl_short"
+        android:shortcutLongLabel="@string/sc_lidl_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="de.pasci.geld"
+            android:targetClass="de.pasci.geld.MainActivity"
+            android:data="geld://lidl" />
+    </shortcut>
+</shortcuts>

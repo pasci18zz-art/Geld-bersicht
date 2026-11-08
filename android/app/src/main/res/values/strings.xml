@@ -4,4 +4,12 @@
     <string name="title_activity_main">Geld</string>
     <string name="package_name">de.pasci.geld</string>
     <string name="custom_url_scheme">de.pasci.geld</string>
+    <string name="sc_bring_short">Mitgebracht</string>
+    <string name="sc_bring_long">Mitgebracht eintragen</string>
+    <string name="sc_pay_short">Zahlung</string>
+    <string name="sc_pay_long">Zahlung eintragen</string>
+    <string name="sc_expense_short">Ausgabe</string>
+    <string name="sc_expense_long">Ausgabe eintragen</string>
+    <string name="sc_lidl_short">Lidl</string>
+    <string name="sc_lidl_long">Lidl-Einkauf eintragen</string>
 </resources>
