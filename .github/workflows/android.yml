@@ -36,6 +36,9 @@ jobs:
       - name: Abhängigkeiten installieren
         run: npm ci
 
+      - name: Build-Nummer eintragen
+        run: echo "window.BUILD = '${{ github.run_number }}';" > www/build.js
+
       - name: Web-App in Android-Projekt kopieren
         run: npx cap sync android
 

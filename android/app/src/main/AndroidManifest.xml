@@ -26,6 +26,51 @@
 
         </activity>
 
+
+        <service
+            android:name=".TileBring"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_bring"
+            android:label="@string/sc_bring_short"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".TilePay"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_pay"
+            android:label="@string/sc_pay_short"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".TileExpense"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_expense"
+            android:label="@string/sc_expense_short"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".TileLidl"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_lidl"
+            android:label="@string/sc_lidl_short"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

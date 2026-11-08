@@ -1250,7 +1250,7 @@ VIEWS.einstellungen = {
         <a class="btn ghost" href="#/import" style="text-decoration:none">${svg('bank')}Kontoauszug importieren (CSV)</a>
         <button class="btn danger" id="wipe">${svg('trash')}Alle Daten löschen</button>
       </section>
-      <p class="small" style="text-align:center;margin:4px 0 0">Geld · Version 1.1 · offline</p>
+      <p class="small" style="text-align:center;margin:4px 0 0">Geld · Version 1.1${window.BUILD && window.BUILD !== 'dev' ? ' · Build ' + esc(window.BUILD) : ''} · offline</p>
     </div>`;
   },
   mount() {
