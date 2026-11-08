@@ -1543,6 +1543,7 @@ function render() {
     clearTimeout(render._t);
     render._t = setTimeout(() => { view.className = ''; }, 700);
   }
+  if (changed) resetSwipeStyles();
   navDir = null;
   if (v.mount) v.mount(r.arg);
   const nav = $('#nav');
@@ -1590,55 +1591,82 @@ function swipeTo(dir) { // dir: -1 = zurück (nach rechts wischen), +1 = weiter
   location.replace('#/' + TABS[t]);
   return true;
 }
-document.addEventListener('touchstart', (e) => {
+/* Wischen per Pointer-Events. Das Scrollen nach oben/unten übernimmt der Browser selbst (touch-action: pan-y),
+ * dadurch bleibt es flüssig – wir bekommen nur die waagerechten Bewegungen. */
+let swRaf = 0; let swX = 0;
+function tabTarget(dx) {
+  const i = TABS.indexOf(route().name);
+  const t = i + (dx < 0 ? 1 : -1);
+  return t >= 0 && t < TABS.length ? t : -1;
+}
+function paintSwipe() {
+  swRaf = 0;
+  if (!sw || sw.lock !== 'h') return;
+  const has = tabTarget(swX) >= 0;
+  const v = viewEl();
+  v.style.transform = `translate3d(${(swX * (has ? 0.5 : 0.12)).toFixed(1)}px,0,0)`;
+  v.style.opacity = String((1 - Math.min(Math.abs(swX), 320) / (has ? 640 : 1600)).toFixed(3));
+}
+function resetSwipeStyles() {
+  const v = $('#view');
+  v.style.transition = ''; v.style.transform = ''; v.style.opacity = ''; v.style.willChange = '';
+}
+function startSwipe(e) {
   sw = null;
-  if (e.touches.length !== 1 || $('#sheet-root').firstElementChild) return;
+  if (e.pointerType === 'mouse' || !e.isPrimary) return;
+  if ($('#sheet-root').firstElementChild) return;
   const r = route();
   if (!TABS.includes(r.name) || r.arg) return;
   if (e.target.closest && e.target.closest('input, select, textarea, [data-no-swipe]')) return;
-  const t = e.touches[0];
-  sw = { x: t.clientX, y: t.clientY, t: Date.now(), lock: null, dx: 0 };
-}, { passive: true });
-document.addEventListener('touchmove', (e) => {
-  if (!sw) return;
-  const t = e.touches[0];
-  const dx = t.clientX - sw.x; const dy = t.clientY - sw.y;
+  sw = { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now(), lock: null, dx: 0 };
+}
+function moveSwipe(e) {
+  if (!sw || e.pointerId !== sw.id) return;
+  const dx = e.clientX - sw.x; const dy = e.clientY - sw.y;
   if (sw.lock === null) {
     if (Math.hypot(dx, dy) < 12) return;
     sw.lock = Math.abs(dx) > Math.abs(dy) * 1.4 ? 'h' : 'v';
+    if (sw.lock === 'h') {
+      const v = viewEl();
+      try { v.setPointerCapture(e.pointerId); } catch (_) { /* nicht schlimm */ }
+      v.style.willChange = 'transform, opacity';
+      v.style.transition = 'none';
+    }
   }
   if (sw.lock !== 'h') return;
-  if (e.cancelable) e.preventDefault();
-  sw.dx = dx;
-  const i = TABS.indexOf(route().name);
-  const has = i + (dx < 0 ? 1 : -1) >= 0 && i + (dx < 0 ? 1 : -1) < TABS.length;
-  const v = viewEl();
-  v.style.transition = 'none';
-  v.style.transform = `translateX(${dx * (has ? 0.45 : 0.12)}px)`;
-  v.style.opacity = String(1 - Math.min(Math.abs(dx), 300) / (has ? 700 : 1500));
-}, { passive: false });
-function endSwipe() {
+  sw.dx = dx; swX = dx;
+  if (!swRaf) swRaf = requestAnimationFrame(paintSwipe);
+}
+function endSwipe(e) {
   const s = sw; sw = null;
   if (!s || s.lock !== 'h') return;
+  if (swRaf) { cancelAnimationFrame(swRaf); swRaf = 0; }
   const v = viewEl();
+  const cancelled = e && e.type === 'pointercancel';
   const dx = s.dx; const fast = Date.now() - s.t < 260;
-  const go = Math.abs(dx) > 80 || (Math.abs(dx) > 40 && fast);
-  const dir = dx < 0 ? 1 : -1;
-  const i = TABS.indexOf(route().name);
-  const ok = go && i + dir >= 0 && i + dir < TABS.length;
-  v.style.transition = ok ? 'transform .14s ease-in, opacity .14s ease-in' : 'transform .25s cubic-bezier(.2,.8,.2,1), opacity .25s';
+  const t = tabTarget(dx);
+  const ok = !cancelled && t >= 0 && (Math.abs(dx) > 80 || (Math.abs(dx) > 40 && fast));
   if (ok) {
-    v.style.transform = `translateX(${dx < 0 ? -48 : 48}px)`;
+    // Alte Seite fliegt raus und bleibt unsichtbar, bis die neue gezeichnet ist (kein Aufblitzen)
+    v.style.transition = 'transform .12s ease-in, opacity .12s ease-in';
+    v.style.transform = `translate3d(${dx < 0 ? -40 : 40}px,0,0)`;
     v.style.opacity = '0';
     if (navigator.vibrate) navigator.vibrate(8);
-    setTimeout(() => { v.style.transition = ''; v.style.transform = ''; v.style.opacity = ''; swipeTo(dir); }, 140);
+    setTimeout(() => swipeTo(dx < 0 ? 1 : -1), 120);
+    setTimeout(resetSwipeStyles, 700); // Sicherheitsnetz, falls kein Seitenwechsel passiert
   } else {
+    v.style.transition = 'transform .22s cubic-bezier(.2,.8,.2,1), opacity .22s';
     v.style.transform = ''; v.style.opacity = '';
-    setTimeout(() => { v.style.transition = ''; }, 260);
+    setTimeout(resetSwipeStyles, 240);
   }
 }
-document.addEventListener('touchend', endSwipe, { passive: true });
-document.addEventListener('touchcancel', endSwipe, { passive: true });
+{
+  const v = viewEl();
+  v.addEventListener('pointerdown', startSwipe, { passive: true });
+  v.addEventListener('pointermove', moveSwipe, { passive: true });
+  v.addEventListener('pointerup', endSwipe, { passive: true });
+  v.addEventListener('pointercancel', endSwipe, { passive: true });
+}
 
 /** Zurück-Taste / Zurück-Geste (Android): offenes Fenster schließen → eine Seite zurück → zur Startseite → App schließen */
 function handleBack() {
