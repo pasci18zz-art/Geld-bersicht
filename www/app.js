@@ -1182,6 +1182,9 @@ VIEWS.einstellungen = {
         <div class="chips" role="radiogroup" aria-label="Startseite" style="padding-bottom:8px">
           ${[['schulden', 'Schulden'], ['uebersicht', 'Übersicht']].map(([k, t]) => `<button class="chip${homeName() === k ? ' on' : ''}" data-home-pick="${k}" role="radio" aria-checked="${homeName() === k}">${t}</button>`).join('')}
         </div>
+        <button class="toggle-row" id="jump-home" aria-pressed="${st.jumpHome !== false}" style="background:none;border:none;padding:8px 2px">
+          ${svg('home')}<span class="grow">Nach einer Pause zur Startseite springen<br><span class="small" style="font-weight:500">Öffnest du die App nach mehr als 2 Minuten wieder (z. B. über den Sperrbildschirm-Knopf), landest du direkt dort.</span></span><span class="switch"></span>
+        </button>
       </section>
 
       <section class="card pad-s">
@@ -1224,6 +1227,7 @@ VIEWS.einstellungen = {
     $$('[data-theme-pick]').forEach((b) => b.onclick = () => { S.settings.theme = b.dataset.themePick; save(); render(); });
     $('#carry').onclick = () => { S.settings.carry = !S.settings.carry; save(); render(); };
     $$('[data-home-pick]').forEach((b) => b.onclick = () => { S.settings.home = b.dataset.homePick; save(); render(); });
+    $('#jump-home').onclick = () => { S.settings.jumpHome = S.settings.jumpHome === false; save(); render(); };
     $('#set-balance').onclick = () => balanceSheet();
     $('#debts-bal').onclick = () => { S.settings.debtsInBalance = !S.settings.debtsInBalance; save(); render(); };
     $('#add-prod').onclick = () => productSheet(null);
@@ -1556,12 +1560,29 @@ function render() {
 }
 
 applyRecurring();
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') {
-    applyRecurring();
-    if (viewMonth > curMonth()) viewMonth = curMonth();
-    render();
+/* App kommt aus dem Hintergrund zurück. War sie länger weg, geht es zur Startseite (z. B. über die Sperrbildschirm-Taste) */
+const AWAY_MS = 120000;
+let hiddenAt = 0;
+function onLeave() { if (!hiddenAt) hiddenAt = Date.now(); }
+function onResume() {
+  const away = hiddenAt ? Date.now() - hiddenAt : 0;
+  hiddenAt = 0;
+  applyRecurring();
+  if (viewMonth > curMonth()) viewMonth = curMonth();
+  if (S.settings.jumpHome !== false && away > AWAY_MS) {
+    const r = route();
+    if (r.name !== homeName() || r.arg) {
+      closeSheetNow();
+      stack.splice(0, stack.length - 1); // Verlauf zurücksetzen: „Zurück“ auf der Startseite schließt die App
+      replacing = true; navDir = 'fade';
+      location.replace('#/' + homeName());
+      return;
+    }
   }
+  render();
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') onResume(); else onLeave();
 });
 render();
 
@@ -1682,6 +1703,7 @@ if (native()) {
     AppPlugin.addListener('backButton', () => {
       if (!handleBack()) { try { AppPlugin.exitApp(); } catch (e) { /* nichts */ } }
     });
+    AppPlugin.addListener('appStateChange', (st) => { if (st && st.isActive) onResume(); else onLeave(); });
   }
 }
 
