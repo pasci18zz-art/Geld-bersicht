@@ -97,7 +97,8 @@ function defaults() {
   return {
     v: 1,
     created: curMonth(),
-    settings: { theme: 'auto', carry: false, lastBackup: null },
+    // home: Startseite · startBalance/startDate/startTs: Kontostand-Anker · debtsInBalance: Schulden im Kontostand mitrechnen
+    settings: { theme: 'auto', carry: false, lastBackup: null, home: 'schulden', startBalance: null, startDate: null, startTs: 0, debtsInBalance: true },
     accounts: [
       { id: 'a1', name: 'Essen & Snacks', budget: 12000, color: '#2E8F55' },
       { id: 'a2', name: 'Freizeit', budget: 15000, color: '#2A8A84' },
@@ -105,8 +106,9 @@ function defaults() {
       { id: 'a4', name: 'Kleidung', budget: 8000, color: '#5E7A2A' },
       { id: 'a5', name: 'Handy & Abos', budget: 3000, color: '#3E6E8E' }
     ],
-    expenses: [],   // {id, amount, accountId, note, date, recurringId?, importKey?}
-    recurring: [],  // {id, name, amount, accountId, day, start, skipped:[]}
+    expenses: [],   // {id, amount, accountId, note, date, ts, recurringId?, importKey?}
+    income: [],     // {id, amount, note, date, ts, recurringId?, importKey?}
+    recurring: [],  // {id, kind:'expense'|'income', name, amount, accountId, day, start, skipped:[]}
     people: [],     // {id, name, color}
     debts: [],      // {id, personId, type:'buy'|'pay', amount, text, date}
     products: [
@@ -138,7 +140,7 @@ function normalize(s) {
   const d = defaults();
   const out = Object.assign({}, d, s);
   out.settings = Object.assign({}, d.settings, s.settings || {});
-  ['accounts', 'expenses', 'recurring', 'people', 'debts', 'products'].forEach((k) => { if (!Array.isArray(out[k])) out[k] = d[k]; });
+  ['accounts', 'expenses', 'income', 'recurring', 'people', 'debts', 'products'].forEach((k) => { if (!Array.isArray(out[k])) out[k] = d[k]; });
   return out;
 }
 function save() {
@@ -177,6 +179,34 @@ const budgetTotal = () => S.accounts.reduce((s, a) => s + a.budget, 0);
 const spentIn = (m, accId) => S.expenses
   .filter((e) => monthOf(e.date) === m && (!accId || e.accountId === accId))
   .reduce((s, e) => s + e.amount, 0);
+const incomeIn = (m) => S.income.filter((i) => monthOf(i.date) === m).reduce((s, i) => s + i.amount, 0);
+/** Einnahmen und Ausgaben eines Monats gemischt, neueste zuerst (_k: 'in' | 'out') */
+const txsOf = (m) => S.income.filter((i) => monthOf(i.date) === m).map((x) => ({ ...x, _k: 'in' }))
+  .concat(S.expenses.filter((e) => monthOf(e.date) === m).map((x) => ({ ...x, _k: 'out' })))
+  .sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
+
+/* Echter Kontostand: Anker (Kontostand + Zeitpunkt) + alle Buchungen danach.
+ * Eine Buchung zählt, wenn sie nach dem Anker-Tag liegt – oder am Anker-Tag selbst, aber erst danach eingetragen wurde.
+ * Importierte Buchungen haben ts = 0, weil der Kontostand aus dem Auszug sie schon enthält. */
+function counted(x) {
+  const st = S.settings;
+  if (st.startBalance == null || !st.startDate) return false;
+  return x.date > st.startDate || (x.date === st.startDate && (x.ts || 0) > (st.startTs || 0));
+}
+function realBalance() {
+  const st = S.settings;
+  if (st.startBalance == null) return null;
+  let b = st.startBalance;
+  S.income.forEach((i) => { if (counted(i)) b += i.amount; });
+  S.expenses.forEach((e) => { if (counted(e)) b -= e.amount; });
+  if (st.debtsInBalance) S.debts.forEach((d) => { if (counted(d)) b += d.type === 'pay' ? d.amount : -d.amount; });
+  return b;
+}
+function setBalanceAnchor(cents, date) {
+  S.settings.startBalance = cents;
+  S.settings.startDate = date || todayStr();
+  S.settings.startTs = Date.now();
+}
 function carryFor(m) {
   if (!S.settings.carry) return 0;
   const p = addMonth(m, -1);
@@ -199,12 +229,16 @@ function applyRecurring() {
     if (!/^\d{4}-\d{2}$/.test(r.start || '')) r.start = cm;
     let m = r.start;
     let guard = 0;
+    const isIn = r.kind === 'income';
+    const list = isIn ? S.income : S.expenses;
     while (m <= cm && guard++ < 240) {
       const day = Math.min(r.day, daysIn(m));
       const due = m < cm || day <= td;
       const skipped = (r.skipped || []).includes(m);
-      if (due && !skipped && !S.expenses.some((e) => e.recurringId === r.id && monthOf(e.date) === m)) {
-        S.expenses.push({ id: uid(), amount: r.amount, accountId: r.accountId, note: r.name, date: `${m}-${pad(day)}`, recurringId: r.id });
+      if (due && !skipped && !list.some((e) => e.recurringId === r.id && monthOf(e.date) === m)) {
+        const date = `${m}-${pad(day)}`;
+        if (isIn) list.push({ id: uid(), amount: r.amount, note: r.name, date, ts: Date.now(), recurringId: r.id });
+        else list.push({ id: uid(), amount: r.amount, accountId: r.accountId, note: r.name, date, ts: Date.now(), recurringId: r.id });
         changed = true;
       }
       m = addMonth(m, 1);
@@ -214,10 +248,12 @@ function applyRecurring() {
 }
 
 /* ---------- Navigation ---------- */
-const stack = [location.hash || '#/uebersicht'];
+/** Startseite: standardmäßig die Schulden-Übersicht (in den Einstellungen änderbar) */
+const homeName = () => (S.settings.home === 'uebersicht' ? 'uebersicht' : 'schulden');
+const stack = [location.hash || '#/' + homeName()];
 let replacing = false;
 function route() {
-  const h = location.hash.replace(/^#\/?/, '') || 'uebersicht';
+  const h = location.hash.replace(/^#\/?/, '') || homeName();
   const [name, arg] = h.split('/');
   return { name: decodeURIComponent(name), arg: arg ? decodeURIComponent(arg) : '' };
 }
@@ -334,11 +370,28 @@ VIEWS.uebersicht = {
     let owed = 0; let owedN = 0;
     S.people.forEach((p) => { const s = saldo(p.id); if (s < 0) { owed += -s; owedN++; } });
 
-    const recent = S.expenses.filter((e) => monthOf(e.date) === m)
-      .sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 4);
+    const recent = txsOf(m).slice(0, 5);
+    const inM = incomeIn(m);
+    const bal = realBalance();
+    const net = inM - spent;
+    const balanceCard = bal === null
+      ? `<button class="card pad" id="balance" style="text-align:left;color:var(--text);display:flex;gap:14px;align-items:center;width:100%">
+          <span class="acc-ic" style="background:var(--accentSoft);color:var(--accent)">${svg('bank')}</span>
+          <div class="grow"><div class="b">Kontostand einrichten</div><div class="small">Trag einmal deinen echten Kontostand ein. Danach rechnet die App mit deinen Einnahmen und Ausgaben weiter.</div></div>${svg('next', 'style="color:var(--sub)"')}</button>`
+      : `<section class="card pad" style="display:flex;flex-direction:column;gap:12px" aria-label="Kontostand">
+          <div class="between" style="align-items:flex-start">
+            <div><div class="eyebrow ${bal < 0 ? 'minus' : 'plus'}">Kontostand</div><div class="big ${bal < 0 ? 'minus' : ''}">${eur(bal)}</div></div>
+            <button class="icon-btn sm" id="balance" aria-label="Kontostand ändern">${svg('edit')}</button>
+          </div>
+          <div class="grid2" style="gap:8px">
+            <div style="padding:10px 12px;border-radius:16px;background:var(--chip)"><div class="small b">Einnahmen</div><div class="bb plus" style="font-size:17px">+${eur(inM)}</div></div>
+            <div style="padding:10px 12px;border-radius:16px;background:var(--chip)"><div class="small b">Ausgaben</div><div class="bb minus" style="font-size:17px">−${eur(spent)}</div></div>
+          </div>
+          <div class="between"><span class="small">${monthName(m)}: ${net >= 0 ? 'Plus' : 'Minus'} <b class="${net >= 0 ? 'plus' : 'minus'}">${signed(net)}</b></span><a class="link" href="#/ausgabe/einnahme">+ Einnahme</a></div>
+        </section>`;
 
     const backupDays = S.settings.lastBackup ? Math.floor((Date.now() - S.settings.lastBackup) / 864e5) : null;
-    const hasData = S.expenses.length + S.debts.length > 10;
+    const hasData = S.expenses.length + S.income.length + S.debts.length > 10;
     const backupHint = hasData && (backupDays === null || backupDays > 30)
       ? `<a href="#/einstellungen" class="card pad" style="display:flex;gap:12px;align-items:center;text-decoration:none;color:var(--text)">
           ${svg('download')}<div class="grow"><div class="b">Zeit für ein Backup</div><div class="small">${backupDays === null ? 'Noch nie gesichert' : 'Letztes vor ' + backupDays + ' Tagen'} – damit bei einem Handywechsel nichts verloren geht.</div></div></a>`
@@ -356,6 +409,8 @@ VIEWS.uebersicht = {
         </div>
         <a class="icon-btn" href="#/einstellungen" aria-label="Einstellungen">${svg('gear')}</a>
       </header>
+
+      ${balanceCard}
 
       <section class="card pad" style="display:flex;align-items:center;gap:16px" aria-label="Noch verfügbar">
         <svg viewBox="0 0 104 104" style="width:104px;height:104px" role="img" aria-label="${pct} Prozent frei">
@@ -398,17 +453,40 @@ VIEWS.uebersicht = {
   mount() {
     $('#mprev').onclick = () => { viewMonth = addMonth(viewMonth, -1); render(); };
     $('#mnext').onclick = () => { if (viewMonth < curMonth()) { viewMonth = addMonth(viewMonth, 1); render(); } };
+    if ($('#balance')) $('#balance').onclick = () => balanceSheet();
     bindExpenseRows();
   }
 };
 
+/** Kontostand eintragen oder korrigieren */
+function balanceSheet() {
+  const cur = realBalance();
+  openSheet(`<h2>${cur === null ? 'Kontostand einrichten' : 'Kontostand korrigieren'}</h2>
+    <p class="muted" style="margin:0">Schau in dein Online-Banking und trag den Kontostand ein, den du <b>jetzt</b> hast. Ab jetzt rechnet die App alle neuen Einnahmen und Ausgaben dazu oder ab.</p>
+    <label class="field"><span class="sr">Kontostand in Euro</span><input id="b-amt" inputmode="decimal" placeholder="z. B. 523,40" value="${cur === null ? '' : centsToInput(cur)}"><span class="unit">€</span></label>
+    <p class="small" style="margin:0 4px">Bei einem Minus ein „−“ davor schreiben.</p>
+    <button class="btn" id="b-save">Speichern</button>`,
+  (el) => {
+    setTimeout(() => $('#b-amt', el).focus(), 50);
+    $('#b-save', el).onclick = () => {
+      const raw = $('#b-amt', el).value.trim();
+      if (!raw) { $('#b-amt', el).focus(); return; }
+      const cents = parseEur(raw);
+      closeSheet();
+      commit('Kontostand gespeichert', () => setBalanceAnchor(cents));
+    };
+  });
+}
+
 function expenseRow(e) {
-  const a = acc(e.accountId);
+  const isIn = e._k === 'in';
+  const a = isIn ? null : acc(e.accountId);
+  const rec = e.recurringId ? ' ' + svg('repeat', 'style="width:13px;height:13px;vertical-align:-2px;color:var(--sub)"') : '';
   return `<button class="row" data-exp="${e.id}">
-    <span class="dot" style="background:${a ? a.color : 'var(--sub)'}"></span>
-    <div class="grow"><div class="b ell">${esc(e.note || (a ? a.name : 'Ausgabe'))}${e.recurringId ? ' ' + svg('repeat', 'style="width:13px;height:13px;vertical-align:-2px;color:var(--sub)"') : ''}</div>
-    <div class="small ell">${esc(a ? a.name : 'Ohne Konto')} · ${dateLabel(e.date)}</div></div>
-    <span class="b" style="white-space:nowrap">${eur(e.amount)}</span></button>`;
+    <span class="dot" style="background:${isIn ? 'var(--accent)' : a ? a.color : 'var(--sub)'}"></span>
+    <div class="grow"><div class="b ell">${esc(e.note || (isIn ? 'Einnahme' : a ? a.name : 'Ausgabe'))}${rec}</div>
+    <div class="small ell">${isIn ? 'Einnahme' : esc(a ? a.name : 'Ohne Konto')} · ${dateLabel(e.date)}</div></div>
+    <span class="b ${isIn ? 'plus' : ''}" style="white-space:nowrap">${isIn ? '+' + eur(e.amount) : eur(e.amount)}</span></button>`;
 }
 function bindExpenseRows() {
   $$('[data-exp]').forEach((b) => b.addEventListener('click', () => go('ausgabe/' + b.dataset.exp)));
@@ -419,20 +497,22 @@ VIEWS.verlauf = {
   nav: 'uebersicht',
   html() {
     const m = viewMonth;
-    const list = S.expenses.filter((e) => monthOf(e.date) === m).sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
+    const list = txsOf(m);
     const groups = [];
     list.forEach((e) => {
       const g = groups[groups.length - 1];
       if (g && g.date === e.date) g.items.push(e); else groups.push({ date: e.date, items: [e] });
     });
+    const dayNet = (items) => items.reduce((s, e) => s + (e._k === 'in' ? e.amount : -e.amount), 0);
+    const inM = incomeIn(m); const outM = spentIn(m);
     return `<div class="page">
       <div class="topbar">
         <button class="icon-btn" id="back" aria-label="Zurück">${svg('back')}</button>
-        <h1>Alle Ausgaben</h1>
+        <h1>Alle Buchungen</h1>
       </div>
-      <div class="between" style="padding:0 6px"><span class="sub">${monthName(m)}</span><span class="b">${eur(spentIn(m))}</span></div>
-      ${groups.length ? groups.map((g) => `<section class="card pad-s"><h2 class="h2">${dateLabel(g.date)}<span class="small b">${eur(g.items.reduce((s, e) => s + e.amount, 0))}</span></h2>${g.items.map(expenseRow).join('')}</section>`).join('')
-    : `<div class="card empty">${svg('wallet')}<div>Keine Ausgaben in diesem Monat.</div></div>`}
+      <div class="between" style="padding:0 6px"><span class="sub">${monthName(m)}</span><span class="small b"><span class="plus">+${eur(inM)}</span> · <span class="minus">−${eur(outM)}</span></span></div>
+      ${groups.length ? groups.map((g) => { const n = dayNet(g.items); return `<section class="card pad-s"><h2 class="h2">${dateLabel(g.date)}<span class="small b ${n >= 0 ? 'plus' : ''}">${signed(n)}</span></h2>${g.items.map(expenseRow).join('')}</section>`; }).join('')
+    : `<div class="card empty">${svg('wallet')}<div>Keine Buchungen in diesem Monat.</div></div>`}
     </div>`;
   },
   mount() {
@@ -474,9 +554,10 @@ VIEWS.konten = {
 
     const rec = S.recurring.slice().sort((a, b) => a.day - b.day).map((r) => {
       const a = acc(r.accountId);
-      return `<button class="row" data-rec="${r.id}"><span class="dot" style="background:${a ? a.color : 'var(--sub)'}"></span>
-        <div class="grow"><div class="b ell">${esc(r.name)}</div><div class="small">jeden ${r.day}. · ${esc(a ? a.name : 'Ohne Konto')}</div></div>
-        <span class="b">${eur(r.amount)}</span></button>`;
+      const isIn = r.kind === 'income';
+      return `<button class="row" data-rec="${r.id}"><span class="dot" style="background:${isIn ? 'var(--accent)' : a ? a.color : 'var(--sub)'}"></span>
+        <div class="grow"><div class="b ell">${esc(r.name)}</div><div class="small">jeden ${r.day}. · ${isIn ? 'Einnahme' : esc(a ? a.name : 'Ohne Konto')}</div></div>
+        <span class="b ${isIn ? 'plus' : ''}">${isIn ? '+' : ''}${eur(r.amount)}</span></button>`;
     }).join('');
 
     return `<div class="page">
@@ -486,10 +567,10 @@ VIEWS.konten = {
       </header>
       <p class="small" style="margin:0 6px">Tipp auf das Budget, um es zu ändern – auf den Namen, um das Konto zu bearbeiten.</p>
       ${cards || '<div class="card empty">Noch keine Konten.</div>'}
-      <section class="card pad-s" aria-label="Feste Ausgaben">
-        <h2 class="h2">Feste Ausgaben <button class="link" id="add-rec">+ Neu</button></h2>
-        <p class="small" style="margin:0 2px 6px">Werden jeden Monat automatisch eingetragen, z. B. Handyvertrag oder Spotify.</p>
-        ${rec || '<div class="empty" style="padding:12px">Noch keine festen Ausgaben.</div>'}
+      <section class="card pad-s" aria-label="Feste Buchungen">
+        <h2 class="h2">Feste Buchungen <button class="link" id="add-rec">+ Neu</button></h2>
+        <p class="small" style="margin:0 2px 6px">Werden jeden Monat automatisch eingetragen, z. B. Handyvertrag oder Spotify – oder Einnahmen wie Taschengeld und Gehalt.</p>
+        ${rec || '<div class="empty" style="padding:12px">Noch keine festen Buchungen.</div>'}
       </section>
     </div>`;
   },
@@ -538,30 +619,41 @@ function accountSheet(id) {
 function recurringSheet(id) {
   const r = id ? S.recurring.find((x) => x.id === id) : null;
   const accOpts = S.accounts.map((a) => `<option value="${a.id}" ${r && r.accountId === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('');
-  openSheet(`<h2>${r ? 'Feste Ausgabe' : 'Neue feste Ausgabe'}</h2>
+  const isIn = !!(r && r.kind === 'income');
+  openSheet(`<h2>${r ? 'Feste Buchung' : 'Neue feste Buchung'}</h2>
+    <label class="field"><span class="sr">Art</span><select id="r-kind"><option value="expense" ${isIn ? '' : 'selected'}>Ausgabe (z. B. Handyvertrag)</option><option value="income" ${isIn ? 'selected' : ''}>Einnahme (z. B. Taschengeld, Gehalt)</option></select></label>
     <label class="field"><span class="sr">Name</span><input id="r-name" placeholder="Name, z. B. Handyvertrag" value="${esc(r ? r.name : '')}" maxlength="40"></label>
     <label class="field"><span class="sr">Betrag</span><input id="r-amt" inputmode="decimal" placeholder="Betrag" value="${r ? centsToInput(r.amount) : ''}"><span class="unit">€</span></label>
     <label class="field">${svg('calendar')}<span class="muted b">Jeden</span><input id="r-day" type="number" inputmode="numeric" min="1" max="31" value="${r ? r.day : 1}" style="max-width:60px"><span class="muted b">. im Monat</span></label>
-    <label class="field"><span class="sr">Konto</span><select id="r-acc">${accOpts}</select></label>
+    <label class="field" id="r-accwrap" style="${isIn ? 'display:none' : ''}"><span class="sr">Konto</span><select id="r-acc">${accOpts}</select></label>
     ${r ? '' : '<p class="small" style="margin:0 4px">Ist der Tag diesen Monat schon vorbei, wird sie gleich eingetragen.</p>'}
     <button class="btn" id="r-save">Speichern</button>
     ${r ? '<button class="btn danger" id="r-del">' + svg('trash') + 'Nicht mehr eintragen</button>' : ''}`,
   (el) => {
+    $('#r-kind', el).onchange = () => { $('#r-accwrap', el).style.display = $('#r-kind', el).value === 'income' ? 'none' : ''; };
     $('#r-save', el).onclick = () => {
       const name = $('#r-name', el).value.trim();
       const amount = parseEur($('#r-amt', el).value);
       const day = clamp(parseInt($('#r-day', el).value, 10) || 1, 1, 31);
+      const kind = $('#r-kind', el).value === 'income' ? 'income' : 'expense';
       const accountId = $('#r-acc', el).value;
       if (!name) { $('#r-name', el).focus(); return; }
       if (amount <= 0) { $('#r-amt', el).focus(); return; }
       closeSheet();
-      commit('Feste Ausgabe gespeichert', () => {
-        if (r) Object.assign(r, { name, amount, day, accountId });
-        else S.recurring.push({ id: uid(), name, amount, day, accountId, start: curMonth(), skipped: [] });
+      commit('Feste Buchung gespeichert', () => {
+        if (r) {
+          // Art geändert: bereits automatisch eingetragene Buchungen dieses Eintrags entfernen
+          if ((r.kind === 'income') !== (kind === 'income')) {
+            S.expenses = S.expenses.filter((e) => e.recurringId !== r.id);
+            S.income = S.income.filter((e) => e.recurringId !== r.id);
+            r.skipped = [];
+          }
+          Object.assign(r, { kind, name, amount, day, accountId });
+        } else S.recurring.push({ id: uid(), kind, name, amount, day, accountId, start: curMonth(), skipped: [] });
         applyRecurring();
       });
     };
-    if (r) $('#r-del', el).onclick = () => { closeSheet(); commit('Feste Ausgabe entfernt', () => { S.recurring = S.recurring.filter((x) => x.id !== r.id); }); };
+    if (r) $('#r-del', el).onclick = () => { closeSheet(); commit('Feste Buchung entfernt', () => { S.recurring = S.recurring.filter((x) => x.id !== r.id); }); };
   });
 }
 
@@ -569,16 +661,22 @@ function recurringSheet(id) {
 VIEWS.ausgabe = {
   nav: null,
   init(arg) {
-    const e = arg ? S.expenses.find((x) => x.id === arg) : null;
+    const id = arg && arg !== 'einnahme' ? arg : null;
+    const inc = id ? S.income.find((x) => x.id === id) : null;
+    const e = inc || (id ? S.expenses.find((x) => x.id === id) : null);
+    const kind = inc || arg === 'einnahme' ? 'in' : 'out';
+    const firstAcc = S.accounts[0] ? S.accounts[0].id : null;
     draft = e
-      ? { id: e.id, amt: centsToInput(e.amount), acc: e.accountId, note: e.note || '', date: e.date, share: false, person: null }
-      : { id: null, amt: '', acc: S.accounts[0] ? S.accounts[0].id : null, note: '', date: todayStr(), share: false, person: null };
+      ? { id: e.id, kind, amt: centsToInput(e.amount), acc: e.accountId || firstAcc, note: e.note || '', date: e.date, share: false, person: null }
+      : { id: null, kind, amt: '', acc: firstAcc, note: '', date: todayStr(), share: false, person: null };
   },
   html() {
     const d = draft;
+    const isIn = d.kind === 'in';
     const amount = parseEur(d.amt);
     let hint = '&nbsp;';
-    if (d.share) hint = 'Zählt nicht zu deinem Budget – du bekommst es ja zurück.';
+    if (isIn) hint = 'Kommt auf dein Konto dazu.';
+    else if (d.share) hint = 'Zählt nicht zu deinem Budget – du bekommst es ja zurück.';
     else if (d.acc && acc(d.acc)) {
       const a = acc(d.acc);
       const old = d.id ? (S.expenses.find((x) => x.id === d.id) || {}).amount || 0 : 0;
@@ -589,25 +687,30 @@ VIEWS.ausgabe = {
     return `<div class="page nonav">
       <div class="topbar">
         <button class="icon-btn" id="close" aria-label="Schließen">${svg('close')}</button>
-        <h1 class="center">${d.id ? 'Ausgabe bearbeiten' : 'Neue Ausgabe'}</h1>
-        ${d.id ? `<button class="icon-btn" id="del" aria-label="Ausgabe löschen" style="color:var(--minus)">${svg('trash')}</button>` : '<span style="width:44px"></span>'}
+        <h1 class="center">${d.id ? (isIn ? 'Einnahme bearbeiten' : 'Ausgabe bearbeiten') : (isIn ? 'Neue Einnahme' : 'Neue Ausgabe')}</h1>
+        ${d.id ? `<button class="icon-btn" id="del" aria-label="Löschen" style="color:var(--minus)">${svg('trash')}</button>` : '<span style="width:44px"></span>'}
       </div>
-      <div><div class="amount" aria-live="polite">${esc(d.amt || '0')} €</div><div class="small" style="text-align:center">${hint}</div></div>
-      ${d.share ? '' : `<div class="chips center" role="radiogroup" aria-label="Konto">${S.accounts.map((a) =>
+      ${d.id ? '' : `<div class="chips center" role="radiogroup" aria-label="Art der Buchung">
+        <button class="chip${isIn ? '' : ' on'}" data-kind="out" role="radio" aria-checked="${!isIn}">Ausgabe</button>
+        <button class="chip${isIn ? ' on' : ''}" data-kind="in" role="radio" aria-checked="${isIn}">Einnahme</button></div>`}
+      <div><div class="amount ${isIn ? 'plus' : ''}" aria-live="polite">${isIn ? '+' : ''}${esc(d.amt || '0')} €</div><div class="small" style="text-align:center">${hint}</div></div>
+      ${d.share || isIn ? '' : `<div class="chips center" role="radiogroup" aria-label="Konto">${S.accounts.map((a) =>
     `<button class="chip${d.acc === a.id ? ' on' : ''}" data-acc="${a.id}" role="radio" aria-checked="${d.acc === a.id}">${esc(a.name)}</button>`).join('')}</div>`}
       <div style="display:flex;gap:8px">
-        <label class="field grow">${svg('pen')}<span class="sr">Wofür?</span><input id="note" placeholder="Wofür? z. B. Lidl" value="${esc(d.note)}" maxlength="60"></label>
+        <label class="field grow">${svg('pen')}<span class="sr">Wofür?</span><input id="note" placeholder="${isIn ? 'Von wem? z. B. Taschengeld' : 'Wofür? z. B. Lidl'}" value="${esc(d.note)}" maxlength="60"></label>
         <label class="field" style="padding:0 10px;flex:0 0 auto"><span class="sr">Datum</span><input id="date" type="date" value="${d.date}" max="${todayStr()}" style="font-size:14px;max-width:132px"></label>
       </div>
-      ${d.id ? '' : `<button class="toggle-row" id="share" aria-pressed="${d.share}">${svg('people')}<span class="grow">Für jemanden mitbezahlt</span><span class="switch"></span></button>`}
-      ${d.share ? (people ? `<div class="chips" role="radiogroup" aria-label="Person">${people}</div>` : '<div class="small" style="margin:0 6px">Noch keine Personen – leg sie unter „Schulden“ an.</div>') : ''}
+      ${d.id || isIn ? '' : `<button class="toggle-row" id="share" aria-pressed="${d.share}">${svg('people')}<span class="grow">Für jemanden mitbezahlt</span><span class="switch"></span></button>`}
+      ${d.share && !isIn ? (people ? `<div class="chips" role="radiogroup" aria-label="Person">${people}</div>` : '<div class="small" style="margin:0 6px">Noch keine Personen – leg sie unter „Schulden“ an.</div>') : ''}
       ${keypadHTML()}
-      <button class="btn" id="save" ${amount > 0 && (!d.share || d.person) ? '' : 'disabled'}>${d.share ? 'Bei Schulden eintragen' : 'Speichern'}</button>
+      <button class="btn" id="save" ${amount > 0 && (isIn || !d.share || d.person) ? '' : 'disabled'}>${d.share && !isIn ? 'Bei Schulden eintragen' : 'Speichern'}</button>
     </div>`;
   },
   mount() {
     const d = draft;
+    const isIn = d.kind === 'in';
     $('#close').onclick = () => back('uebersicht');
+    $$('[data-kind]').forEach((b) => b.onclick = () => { d.kind = b.dataset.kind; if (d.kind === 'in') d.share = false; render(); });
     $$('.key').forEach((k) => k.onclick = () => { d.amt = pressKey(d.amt, k.dataset.key); render(); });
     $$('[data-acc]').forEach((b) => b.onclick = () => { d.acc = b.dataset.acc; render(); });
     $$('[data-person-pick]').forEach((b) => b.onclick = () => { d.person = b.dataset.personPick; render(); });
@@ -616,9 +719,10 @@ VIEWS.ausgabe = {
     const sh = $('#share');
     if (sh) sh.onclick = () => { d.share = !d.share; render(); };
     if ($('#del')) $('#del').onclick = () => {
-      const e = S.expenses.find((x) => x.id === d.id);
-      commit('Ausgabe gelöscht', () => {
-        S.expenses = S.expenses.filter((x) => x.id !== d.id);
+      const e = (isIn ? S.income : S.expenses).find((x) => x.id === d.id);
+      commit(isIn ? 'Einnahme gelöscht' : 'Ausgabe gelöscht', () => {
+        if (isIn) S.income = S.income.filter((x) => x.id !== d.id);
+        else S.expenses = S.expenses.filter((x) => x.id !== d.id);
         if (e && e.recurringId) {
           const r = S.recurring.find((x) => x.id === e.recurringId);
           if (r) { r.skipped = r.skipped || []; r.skipped.push(monthOf(e.date)); }
@@ -628,17 +732,24 @@ VIEWS.ausgabe = {
     $('#save').onclick = () => {
       const amount = parseEur(d.amt);
       if (amount <= 0) return;
+      if (isIn) {
+        commit(d.id ? 'Einnahme gespeichert' : `+${eur(amount)} eingetragen`, () => {
+          if (d.id) Object.assign(S.income.find((x) => x.id === d.id), { amount, note: d.note.trim(), date: d.date });
+          else S.income.push({ id: uid(), amount, note: d.note.trim(), date: d.date, ts: Date.now() });
+        }, { after: () => { if (monthOf(d.date) !== viewMonth) viewMonth = monthOf(d.date); back('uebersicht'); } });
+        return;
+      }
       if (d.share) {
         const p = person(d.person);
         if (!p) return;
         commit(`${p.name}: ${eur(amount)} eingetragen`, () => {
-          S.debts.push({ id: uid(), personId: p.id, type: 'buy', amount, text: d.note.trim() || 'Mitbezahlt', date: d.date });
+          S.debts.push({ id: uid(), personId: p.id, type: 'buy', amount, text: d.note.trim() || 'Mitbezahlt', date: d.date, ts: Date.now() });
         }, { after: () => back('uebersicht') });
         return;
       }
       commit(d.id ? 'Ausgabe gespeichert' : `${eur(amount)} eingetragen`, () => {
         if (d.id) Object.assign(S.expenses.find((x) => x.id === d.id), { amount, accountId: d.acc, note: d.note.trim(), date: d.date });
-        else S.expenses.push({ id: uid(), amount, accountId: d.acc, note: d.note.trim(), date: d.date });
+        else S.expenses.push({ id: uid(), amount, accountId: d.acc, note: d.note.trim(), date: d.date, ts: Date.now() });
       }, { after: () => { if (monthOf(d.date) !== viewMonth) viewMonth = monthOf(d.date); back('uebersicht'); } });
     };
   }
@@ -825,7 +936,7 @@ VIEWS.mitbringen = {
       if (extra) { sum += extra; parts.push(note || 'Betrag'); } else if (note) parts.push(note);
       if (sum <= 0) return;
       commit(`${p.name}: ${eur(sum)} eingetragen`, () => {
-        S.debts.push({ id: uid(), personId: p.id, type: 'buy', amount: sum, text: parts.join(', '), date: todayStr() });
+        S.debts.push({ id: uid(), personId: p.id, type: 'buy', amount: sum, text: parts.join(', '), date: todayStr(), ts: Date.now() });
       }, { after: () => back('schulden') });
     };
   }
@@ -872,7 +983,7 @@ VIEWS.zahlung = {
       const amount = parseEur(draft.pay);
       if (amount <= 0) return;
       commit(`${p.name} hat ${eur(amount)} gezahlt`, () => {
-        S.debts.push({ id: uid(), personId: p.id, type: 'pay', amount, text: 'Zahlung', date: todayStr() });
+        S.debts.push({ id: uid(), personId: p.id, type: 'pay', amount, text: 'Zahlung', date: todayStr(), ts: Date.now() });
       }, { after: () => back('schulden') });
     };
   }
@@ -989,6 +1100,25 @@ VIEWS.einstellungen = {
       </section>
 
       <section class="card pad-s">
+        <h2 class="h2">Startseite</h2>
+        <p class="small" style="margin:0 2px 8px">Diese Seite siehst du, wenn du die App öffnest.</p>
+        <div class="chips" role="radiogroup" aria-label="Startseite" style="padding-bottom:8px">
+          ${[['schulden', 'Schulden'], ['uebersicht', 'Übersicht']].map(([k, t]) => `<button class="chip${homeName() === k ? ' on' : ''}" data-home-pick="${k}" role="radio" aria-checked="${homeName() === k}">${t}</button>`).join('')}
+        </div>
+      </section>
+
+      <section class="card pad-s">
+        <h2 class="h2">Kontostand</h2>
+        <button class="row" id="set-balance" style="padding:8px 2px">
+          <span class="acc-ic" style="background:var(--accentSoft);color:var(--accent)">${svg('bank')}</span>
+          <div class="grow"><div class="b">${realBalance() === null ? 'Noch nicht eingerichtet' : 'Aktuell ' + eur(realBalance())}</div><div class="small">Antippen, um den echten Kontostand einzutragen oder zu korrigieren.</div></div>${svg('next', 'style="color:var(--sub)"')}
+        </button>
+        <button class="toggle-row" id="debts-bal" aria-pressed="${!!st.debtsInBalance}" style="background:none;border:none;padding:8px 2px">
+          ${svg('people')}<span class="grow">Schulden im Kontostand mitrechnen<br><span class="small" style="font-weight:500">Was du für andere mitgebracht hast, zählt als ausgegeben. Zahlungen von ihnen zählen als eingenommen.</span></span><span class="switch"></span>
+        </button>
+      </section>
+
+      <section class="card pad-s">
         <h2 class="h2">Budget</h2>
         <button class="toggle-row" id="carry" aria-pressed="${!!st.carry}" style="background:none;border:none;padding:8px 2px">
           ${svg('repeat')}<span class="grow">Rest vom Vormonat mitnehmen<br><span class="small" style="font-weight:500">Übrig gebliebenes Geld (oder ein Minus) wird zum nächsten Monat dazugerechnet.</span></span><span class="switch"></span>
@@ -1009,18 +1139,21 @@ VIEWS.einstellungen = {
         <a class="btn ghost" href="#/import" style="text-decoration:none">${svg('bank')}Kontoauszug importieren (CSV)</a>
         <button class="btn danger" id="wipe">${svg('trash')}Alle Daten löschen</button>
       </section>
-      <p class="small" style="text-align:center;margin:4px 0 0">Geld · Version 1.0 · offline</p>
+      <p class="small" style="text-align:center;margin:4px 0 0">Geld · Version 1.1 · offline</p>
     </div>`;
   },
   mount() {
     $('#back').onclick = () => back('uebersicht');
     $$('[data-theme-pick]').forEach((b) => b.onclick = () => { S.settings.theme = b.dataset.themePick; save(); render(); });
     $('#carry').onclick = () => { S.settings.carry = !S.settings.carry; save(); render(); };
+    $$('[data-home-pick]').forEach((b) => b.onclick = () => { S.settings.home = b.dataset.homePick; save(); render(); });
+    $('#set-balance').onclick = () => balanceSheet();
+    $('#debts-bal').onclick = () => { S.settings.debtsInBalance = !S.settings.debtsInBalance; save(); render(); };
     $('#add-prod').onclick = () => productSheet(null);
     $$('[data-prod]').forEach((b) => b.onclick = () => productSheet(b.dataset.prod));
     $('#export').onclick = exportBackup;
     $('#import-file').addEventListener('change', (e) => importBackup(e.target.files[0]));
-    $('#wipe').onclick = () => confirmSheet('Wirklich alles löschen?', 'Alle Konten, Ausgaben, Personen und Schulden werden gelöscht. Mach vorher besser ein Backup.', 'Alles löschen',
+    $('#wipe').onclick = () => confirmSheet('Wirklich alles löschen?', 'Alle Konten, Ausgaben, Einnahmen, Personen und Schulden werden gelöscht. Mach vorher besser ein Backup.', 'Alles löschen',
       () => commit('Alles gelöscht', () => { S = defaults(); }));
   }
 };
@@ -1133,25 +1266,30 @@ function importBackup(file) {
 
 /* ---------- CSV-Import (Kontoauszug, z. B. VR-Banking) ---------- */
 let importRows = null;
+let importSaldo = null;      // {amount, date} aus dem Auszug
+let importUseSaldo = false;  // Kontostand aus dem Auszug übernehmen?
 VIEWS.import = {
   nav: null,
   html() {
     const rows = importRows;
     const opts = (sel) => S.accounts.map((a) => `<option value="${a.id}" ${a.id === sel ? 'selected' : ''}>${esc(a.name)}</option>`).join('');
     const n = rows ? rows.filter((r) => r.on).length : 0;
+    const nIn = rows ? rows.filter((r) => r.type === 'in').length : 0;
+    const sal = importSaldo;
     return `<div class="page ${rows ? 'withbar' : ''}">
       <div class="topbar">
         <button class="icon-btn" id="back" aria-label="Zurück">${svg('back')}</button>
         <h1>Kontoauszug importieren</h1>
       </div>
+      ${rows && sal ? `<button class="toggle-row" id="use-saldo" aria-pressed="${importUseSaldo}">${svg('bank')}<span class="grow">Kontostand übernehmen: <b>${eur(sal.amount)}</b><br><span class="small" style="font-weight:500">laut Auszug am ${dateLabel(sal.date)} – dein Kontostand in der App stimmt dann mit der Bank überein.</span></span><span class="switch"></span></button>` : ''}
       ${rows ? `<section class="card pad-s">
-          <h2 class="h2">${rows.length} Abbuchungen gefunden</h2>
-          <p class="small" style="margin:0 2px 6px">Wähle aus, was übernommen werden soll, und ordne es einem Konto zu. Bereits importierte sind ausgegraut.</p>
+          <h2 class="h2">${rows.length} Buchungen gefunden</h2>
+          <p class="small" style="margin:0 2px 6px">${rows.length - nIn} Ausgaben und ${nIn} Einnahmen. Wähle aus, was übernommen werden soll, und ordne Ausgaben einem Konto zu. Bereits importierte sind ausgegraut.</p>
           ${rows.map((r, i) => `<div class="imp-row${r.dup ? ' dup' : ''}">
             <input type="checkbox" class="check" data-i="${i}" ${r.on ? 'checked' : ''} aria-label="${esc(r.name)} übernehmen">
-            <div class="grow"><div class="between"><span class="b ell">${esc(r.name || 'Unbekannt')}</span><span class="bb" style="white-space:nowrap">${eur(r.amount)}</span></div>
+            <div class="grow"><div class="between"><span class="b ell">${esc(r.name || 'Unbekannt')}</span><span class="bb ${r.type === 'in' ? 'plus' : ''}" style="white-space:nowrap">${r.type === 'in' ? '+' : ''}${eur(r.amount)}</span></div>
               <div class="small ell">${dateLabel(r.date)}${r.purpose ? ' · ' + esc(r.purpose) : ''}</div>
-              <select data-acc-i="${i}" aria-label="Konto">${opts(r.acc)}</select></div>
+              ${r.type === 'in' ? '<span class="pill soft" style="margin-top:6px">Einnahme</span>' : `<select data-acc-i="${i}" aria-label="Konto">${opts(r.acc)}</select>`}</div>
           </div>`).join('')}
         </section>`
     : `<section class="card pad" style="display:flex;flex-direction:column;gap:12px">
@@ -1174,12 +1312,18 @@ VIEWS.import = {
     if (f) f.addEventListener('change', () => readCSV(f.files[0]));
     $$('[data-i]').forEach((c) => c.addEventListener('change', () => { importRows[+c.dataset.i].on = c.checked; render(); }));
     $$('[data-acc-i]').forEach((s) => s.addEventListener('change', () => { importRows[+s.dataset.accI].acc = s.value; }));
-    if ($('#reset')) $('#reset').onclick = () => { importRows = null; render(); };
+    if ($('#use-saldo')) $('#use-saldo').onclick = () => { importUseSaldo = !importUseSaldo; render(); };
+    if ($('#reset')) $('#reset').onclick = () => { importRows = null; importSaldo = null; render(); };
     if ($('#do-import')) $('#do-import').onclick = () => {
       const sel = importRows.filter((r) => r.on);
-      commit(`${sel.length} Ausgaben importiert`, () => {
-        sel.forEach((r) => S.expenses.push({ id: uid(), amount: r.amount, accountId: r.acc, note: r.name, date: r.date, importKey: r.key }));
-      }, { after: () => { importRows = null; back('einstellungen'); } });
+      commit(`${sel.length} Buchungen importiert`, () => {
+        // ts: 0 → der Kontostand aus dem Auszug enthält diese Buchungen schon
+        sel.forEach((r) => {
+          if (r.type === 'in') S.income.push({ id: uid(), amount: r.amount, note: r.name, date: r.date, ts: 0, importKey: r.key });
+          else S.expenses.push({ id: uid(), amount: r.amount, accountId: r.acc, note: r.name, date: r.date, ts: 0, importKey: r.key });
+        });
+        if (importSaldo && importUseSaldo) setBalanceAnchor(importSaldo.amount, importSaldo.date);
+      }, { after: () => { importRows = null; importSaldo = null; back('einstellungen'); } });
     };
   }
 };
@@ -1193,8 +1337,10 @@ function readCSV(file) {
     catch (e) { text = new TextDecoder('windows-1252').decode(r.result); }
     const rows = parseBankCSV(text);
     if (!rows) { toast('Format nicht erkannt – ist das eine CSV der Bank?'); return; }
-    if (!rows.length) { toast('Keine Abbuchungen gefunden'); return; }
+    if (!rows.length) { toast('Keine Buchungen gefunden'); return; }
     importRows = rows;
+    importSaldo = rows.saldo || null;
+    importUseSaldo = !!importSaldo;
     render();
   };
   r.readAsArrayBuffer(file);
@@ -1229,24 +1375,40 @@ function parseBankCSV(text) {
   const iName = find(/name zahlungsbeteiligter|zahlungsempf|empf[aä]nger|auftraggeber|beg[uü]nstigter/i, /iban|bic|konto/i);
   const iPurpose = find(/verwendungszweck/i);
   const iSH = find(/^(soll\/haben|s\/h)$/i);
+  const iSaldo = find(/saldo/i, /vor |vorher|anfang/i);
   if (iDate < 0 || iAmt < 0) return null;
-  const known = new Set(S.expenses.filter((e) => e.importKey).map((e) => e.importKey));
+  const known = new Set(S.expenses.concat(S.income).filter((e) => e.importKey).map((e) => e.importKey));
   const out = [];
+  const withSaldo = []; // in Dateireihenfolge, um den neuesten Kontostand zu finden
   rows.slice(hi + 1).forEach((r) => {
     if (r.length < h.length / 2) return;
     const date = toISODate(r[iDate]);
     if (!date) return;
     let c = parseEur(r[iAmt]);
     if (iSH >= 0) { const sh = (r[iSH] || '').trim().toUpperCase(); if (sh === 'S') c = -Math.abs(c); else if (sh === 'H') c = Math.abs(c); }
-    if (c >= 0) return; // nur Abbuchungen
+    if (iSaldo >= 0 && String(r[iSaldo] || '').trim()) {
+      let sa = parseEur(r[iSaldo]);
+      if (/(^|\s)(s|soll)$/i.test(String(r[iSaldo]).trim())) sa = -Math.abs(sa);
+      withSaldo.push({ date, amount: sa });
+    }
+    if (c === 0) return;
+    const type = c < 0 ? 'out' : 'in';
     const name = (iName >= 0 ? r[iName] : '').trim().replace(/\s+/g, ' ');
     const purpose = (iPurpose >= 0 ? r[iPurpose] : '').trim().replace(/\s+/g, ' ').slice(0, 80);
-    const amount = -c;
-    const key = date + '|' + amount + '|' + name.toLowerCase();
+    const amount = Math.abs(c);
+    // Ausgaben-Schlüssel bleibt wie früher (damit schon importierte erkannt werden); Einnahmen bekommen ein Präfix
+    const key = (type === 'in' ? 'in|' : '') + date + '|' + amount + '|' + name.toLowerCase();
     const dup = known.has(key);
-    out.push({ date, amount, name: name || purpose.slice(0, 30), purpose, key, dup, on: !dup, acc: guessAccount(name + ' ' + purpose) });
+    out.push({ type, date, amount, name: name || purpose.slice(0, 30), purpose, key, dup, on: !dup, acc: type === 'out' ? guessAccount(name + ' ' + purpose) : null });
   });
-  return out.sort((a, b) => b.date.localeCompare(a.date));
+  out.sort((a, b) => b.date.localeCompare(a.date));
+  if (withSaldo.length) {
+    // Der Auszug ist meist neueste-zuerst sortiert, manchmal umgekehrt: nach Datum der ersten/letzten Zeile entscheiden
+    const descending = withSaldo[0].date >= withSaldo[withSaldo.length - 1].date;
+    const newest = descending ? withSaldo[0] : withSaldo[withSaldo.length - 1];
+    out.saldo = newest;
+  }
+  return out;
 }
 function toISODate(s) {
   const m = String(s || '').trim().match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/);
