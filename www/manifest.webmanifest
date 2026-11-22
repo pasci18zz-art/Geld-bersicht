@@ -33,7 +33,7 @@
     {
       "name": "Mitgebracht eintragen",
       "short_name": "Mitgebracht",
-      "url": "./#/schnell/mitbringen",
+      "url": "./?a=mitbringen",
       "icons": [
         {
           "src": "icons/icon-192.png",
@@ -44,7 +44,7 @@
     {
       "name": "Zahlung eintragen",
       "short_name": "Zahlung",
-      "url": "./#/schnell/zahlung",
+      "url": "./?a=zahlung",
       "icons": [
         {
           "src": "icons/icon-192.png",
@@ -55,7 +55,7 @@
     {
       "name": "Ausgabe eintragen",
       "short_name": "Ausgabe",
-      "url": "./#/ausgabe",
+      "url": "./?a=ausgabe",
       "icons": [
         {
           "src": "icons/icon-192.png",
@@ -66,7 +66,7 @@
     {
       "name": "Lidl-Einkauf eintragen",
       "short_name": "Lidl",
-      "url": "./#/ausgabe/lidl",
+      "url": "./?a=lidl",
       "icons": [
         {
           "src": "icons/icon-192.png",

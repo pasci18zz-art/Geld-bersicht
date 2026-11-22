@@ -43,6 +43,9 @@ function boot() {
   stack = [homeTab()];
   bindSwipe();
   render(true);
+  // Kurzbefehle der Web-Version: ?a=mitbringen | zahlung | ausgabe | lidl
+  const a = new URLSearchParams(location.search).get('a');
+  if (a) handleActionUrl('geld://' + a);
   window.addEventListener('resize', () => movePill($('#nav')));
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') goBack();
