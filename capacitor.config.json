@@ -4,5 +4,11 @@
   "webDir": "www",
   "android": {
     "backgroundColor": "#EAF2EC"
+  },
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_geld",
+      "iconColor": "#3E8E5E"
+    }
   }
 }

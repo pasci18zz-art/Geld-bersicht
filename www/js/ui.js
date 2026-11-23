@@ -71,26 +71,26 @@ function pressKey(str, k) {
 /* ---------- Diagramme ---------- */
 /** Ring-Diagramm mit Symbolen auf den Stücken. items: [{cat, value}] */
 function donutHTML(items, o = {}) {
-  const size = o.size || 220; const sw = o.stroke || 24;
+  const size = o.size || 220; const sw = o.stroke || Math.round(size * 0.17);
   const r = (size - sw) / 2 - 10; const c = size / 2; const C = 2 * Math.PI * r;
   const total = items.reduce((s, x) => s + Math.max(0, x.value), 0);
   const list = items.filter((x) => x.value > 0);
-  const gap = list.length > 1 ? Math.min(C * 0.012 + sw, C / list.length / 2) : 0;
+  // Kuchen-Look: Stücke stoßen aneinander, nur eine feine Trennfuge
+  const gap = list.length > 1 ? 2.4 : 0;
   let acc = 0;
   const segs = []; const bubbles = [];
   list.forEach((x, i) => {
     const len = (x.value / total) * C;
     // Kleine Stücke mit geraden Enden, damit sich die runden Kappen nicht überlappen
-    const small = list.length > 1 && len < sw * 1.6;
-    const vis = small ? Math.max(1.5, len - 3) : Math.max(0.01, len - gap);
-    const start = small ? acc + 1.5 : acc + gap / 2;
-    segs.push(`<circle class="seg-arc" cx="${c}" cy="${c}" r="${r}" fill="none" stroke="${x.cat.color}" stroke-width="${sw}" stroke-linecap="${small ? 'butt' : 'round'}"
+    const vis = Math.max(0.6, len - gap);
+    const start = acc + gap / 2;
+    segs.push(`<circle class="seg-arc" cx="${c}" cy="${c}" r="${r}" fill="none" stroke="${x.cat.color}" stroke-width="${sw}" stroke-linecap="butt"
       stroke-dasharray="0 ${C.toFixed(2)}" data-len="${vis.toFixed(2)}" data-c="${C.toFixed(2)}" style="--d:${i * 90}ms"
       transform="rotate(${(-90 + (start / C) * 360).toFixed(2)} ${c} ${c})"/>`);
     const mid = ((acc + len / 2) / C) * 2 * Math.PI - Math.PI / 2;
     if (o.icons !== false && x.value / total >= 0.06) {
       const bx = c + r * Math.cos(mid); const by = c + r * Math.sin(mid);
-      bubbles.push(`<span class="d-bubble" style="left:${(bx / size * 100).toFixed(2)}%;top:${(by / size * 100).toFixed(2)}%;--c:${x.cat.color};--d:${300 + i * 90}ms">${svg(x.cat.icon)}</span>`);
+      bubbles.push(`<span class="d-bubble" style="left:${(bx / size * 100).toFixed(2)}%;top:${(by / size * 100).toFixed(2)}%;--c:${x.cat.color};--d:${300 + i * 90}ms">${x.cat.photo ? `<img src="${x.cat.photo}" alt="">` : svg(x.cat.icon)}</span>`);
     }
     acc += len;
   });

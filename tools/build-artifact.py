@@ -17,7 +17,7 @@ scripts = re.findall(r'<script src="(js/[^"]+)"></script>', index)
 
 css = (ROOT / 'style.css').read_text(encoding='utf-8')
 # Lokale Schriftdatei gibt es im Artefakt nicht – dort kommt die Schrift von Google Fonts
-css = re.sub(r'@font-face\s*\{[^}]*\}\s*', '', css, count=1)
+css = re.sub(r'@font-face\s*\{[^}]*\}\s*', '', css)
 
 js = '\n'.join((ROOT / s).read_text(encoding='utf-8') for s in scripts)
 if '</script' in js.lower():
@@ -27,7 +27,7 @@ page = f"""<title>Geld Finanzmanager</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
 <style>
 {css}
 </style>

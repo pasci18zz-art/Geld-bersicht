@@ -20,8 +20,31 @@ VIEWS.einstellungen = {
 
       <section class="card glass pad-s">
         <h2 class="h2">Verstecken</h2>
-        ${tog('s-priv', st.privacy, 'eyeOff', 'Große Beträge verstecken', 'Beim Öffnen sind Kontostand und Beträge über der Grenze versteckt. Tippen zeigt sie – beim Verlassen der App werden sie wieder versteckt.')}
-        ${st.privacy ? `<div class="chips" style="padding:4px 2px 8px">${[2000, 5000, 10000, 0].map((v) => `<button type="button" class="chip${st.privacyLimit === v ? ' on' : ''}" data-plim="${v}">${v ? 'über ' + v / 100 + ' €' : 'alle Beträge'}</button>`).join('')}</div>` : ''}
+        ${tog('s-priv', st.privacy, 'eyeOff', 'Zu bestimmten Zeiten verstecken', 'In den Zeitfenstern sind Kontostand und große Beträge versteckt (z. B. in der Schule). Sonst ist alles sichtbar. Das Auge oben versteckt jederzeit von Hand.')}
+        ${st.privacy ? `<div class="label">Beträge verstecken</div>
+        <div class="chips" style="padding:2px 2px 6px">${[2000, 5000, 10000, 0].map((v) => `<button type="button" class="chip${st.privacyLimit === v ? ' on' : ''}" data-plim="${v}">${v ? 'über ' + v / 100 + ' €' : 'alle Beträge'}</button>`).join('')}</div>
+        <div class="label">Zeitfenster</div>
+        <div class="hw-list">${[1, 2, 3, 4, 5, 6, 0].map((wd) => { const wins = st.hideWin[wd] || []; return `<div class="hw-day${wins.length ? '' : ' off'}">
+          <span class="hw-name">${WD_L[wd].slice(0, 2)}</span>
+          <span class="hw-wins">${wins.length ? wins.map((w, i) => `<span class="hw-win"><input type="time" value="${esc(w[0])}" data-hw="${wd}:${i}:0" aria-label="${WD_L[wd]} von"><span>–</span><input type="time" value="${esc(w[1])}" data-hw="${wd}:${i}:1" aria-label="${WD_L[wd]} bis"><button type="button" class="hw-x" data-hwdel="${wd}:${i}" aria-label="Zeitfenster löschen">${svg('close')}</button></span>`).join('') : '<span class="small">immer sichtbar</span>'}</span>
+          <button type="button" class="hw-add" data-hwadd="${wd}" aria-label="Zeitfenster für ${WD_L[wd]} hinzufügen">${svg('plus')}</button>
+        </div>`; }).join('')}</div>
+        <p class="small" style="margin:6px 2px 2px">${inHideWindow() ? 'Gerade ist ein Zeitfenster aktiv.' : 'Gerade ist kein Zeitfenster aktiv.'}</p>` : ''}
+      </section>
+
+      <section class="card glass pad-s">
+        <h2 class="h2">Sicherheit</h2>
+        ${tog('s-lock', st.lock, 'lock', 'App-Sperre mit Fingerabdruck', 'Beim Öffnen fragt die App nach Fingerabdruck (oder Handy-PIN).')}
+        ${st.lock ? `<div class="chips" style="padding:2px 2px 8px">${[[0, 'Sofort'], [60, 'nach 1 Min'], [300, 'nach 5 Min']].map(([v, l]) => `<button type="button" class="chip${st.lockDelay === v ? ' on' : ''}" data-ldel="${v}">${l}</button>`).join('')}</div>` : ''}
+        ${tog('s-rbio', st.revealBio !== false, 'finger', 'Aufdecken mit Fingerabdruck', 'Versteckte Beträge zeigen sich erst nach dem Fingerabdruck.')}
+        ${isNative() ? '' : '<p class="small" style="margin:4px 2px">Fingerabdruck gibt es nur in der installierten App.</p>'}
+      </section>
+
+      <section class="card glass pad-s">
+        <h2 class="h2">Erinnerungen</h2>
+        ${tog('s-remind', st.remind, 'bell', 'Bei Fälligkeit erinnern', 'Mitteilung, wenn eine geplante Buchung fällig ist – mit „Bezahlt“-Knopf.')}
+        ${st.remind ? `<label class="field glass time-field"><span class="grow">Uhrzeit</span><input type="time" id="s-rtime" value="${esc(st.remindTime || '09:00')}"></label>` : ''}
+        ${isNative() ? '' : '<p class="small" style="margin:4px 2px">Mitteilungen gibt es nur in der installierten App.</p>'}
       </section>
 
       <section class="card glass pad-s">
@@ -46,12 +69,14 @@ VIEWS.einstellungen = {
       <section class="card glass pad-s stack-btns">
         <h2 class="h2">Daten</h2>
         <p class="small" style="margin:0 2px">Alles bleibt nur auf diesem Gerät. Letztes Backup: <b>${lb}</b></p>
+        <div class="label">Automatisch ans Backup erinnern</div>
+        <div class="chips" style="padding:2px 2px 6px">${[[0, 'Aus'], [7, 'Wöchentlich'], [30, 'Monatlich']].map(([v, l]) => `<button type="button" class="chip${(st.backupEvery || 0) === v ? ' on' : ''}" data-bkp="${v}">${l}</button>`).join('')}</div>
         <button type="button" class="btn ghost" id="s-export">${svg('download')}Backup speichern</button>
         <label class="btn ghost" style="cursor:pointer">${svg('upload')}Backup laden<input type="file" id="s-import-file" accept=".json,application/json" class="sr"></label>
         ${S.demo ? `<button type="button" class="btn ghost" id="s-demo">${svg('sparkle')}Beispieldaten löschen</button>` : ''}
         <button type="button" class="btn danger" id="s-wipe">${svg('trash')}Alle Daten löschen</button>
       </section>
-      <p class="small center-txt">Geld · Version 2.0${window.BUILD && window.BUILD !== 'dev' ? ' · Build ' + esc(window.BUILD) : ''} · offline</p>
+      <p class="small center-txt">Geld · Version 3.0${window.BUILD && window.BUILD !== 'dev' ? ' · Build ' + esc(window.BUILD) : ''} · offline</p>
     </div>`;
   },
   mount() {
@@ -63,6 +88,32 @@ VIEWS.einstellungen = {
     $('#s-motion').onclick = () => set('motion', st.motion === false);
     $('#s-priv').onclick = () => set('privacy', !st.privacy);
     $$('[data-plim]').forEach((b) => b.onclick = () => set('privacyLimit', +b.dataset.plim));
+    const hw = () => { st.hideWin = Object.assign({}, st.hideWin); return st.hideWin; };
+    $$('[data-hw]').forEach((inp) => inp.addEventListener('change', () => {
+      const [wd, i, k] = inp.dataset.hw.split(':').map(Number);
+      if (!inp.value) return;
+      hw()[wd][i][k] = inp.value; save();
+    }));
+    $$('[data-hwdel]').forEach((b) => b.onclick = () => { const [wd, i] = b.dataset.hwdel.split(':').map(Number); hw()[wd] = (st.hideWin[wd] || []).filter((_, j) => j !== i); save(); render(false); });
+    $$('[data-hwadd]').forEach((b) => b.onclick = () => { const wd = +b.dataset.hwadd; const l = (st.hideWin[wd] || []).slice(); l.push(l.length ? ['14:00', '16:00'] : ['07:45', '13:15']); hw()[wd] = l; save(); render(false); });
+    $('#s-lock').onclick = async () => {
+      if (!st.lock && isNative()) {
+        const B = plugin('NativeBiometric');
+        const a = B ? await B.isAvailable({ useFallback: true }).catch(() => null) : null;
+        if (!a || !a.isAvailable) { toast('Am Handy ist keine Bildschirmsperre / kein Fingerabdruck eingerichtet'); return; }
+        if (!(await bioAuth('App-Sperre einschalten'))) return;
+      }
+      set('lock', !st.lock);
+    };
+    $$('[data-ldel]').forEach((b) => b.onclick = () => set('lockDelay', +b.dataset.ldel));
+    $('#s-rbio').onclick = () => set('revealBio', st.revealBio === false);
+    $('#s-remind').onclick = async () => {
+      const on = !st.remind;
+      if (on && !(await notifPermission(true))) toast('Mitteilungen sind für Geld ausgeschaltet');
+      set('remind', on); syncNotifications();
+    };
+    if ($('#s-rtime')) $('#s-rtime').addEventListener('change', (e) => { if (e.target.value) { st.remindTime = e.target.value; save(); syncNotifications(); } });
+    $$('[data-bkp]').forEach((b) => b.onclick = () => { set('backupEvery', +b.dataset.bkp); syncNotifications(); });
     $('#s-bal').onclick = () => balanceSheet();
     $('#s-import').onclick = () => go('import');
     $('#s-cat-out').onclick = () => go('kategorien/out');
@@ -142,14 +193,20 @@ VIEWS.kategorien = {
 function catSheet(id, kind, onCreated) {
   const c = id ? S.cats.find((x) => x.id === id) : null;
   const k = c ? c.kind : (kind || 'out');
-  const d = { name: c ? c.name : '', icon: c ? c.icon : (k === 'in' ? 'coins' : 'tag'), color: c ? c.color : COLORS[S.cats.length % COLORS.length], budget: c ? centsToInput(c.budget || 0) : '' };
+  const d = { name: c ? c.name : '', icon: c ? c.icon : (k === 'in' ? 'coins' : 'tag'), color: c ? c.color : COLORS[S.cats.length % COLORS.length], photo: c ? c.photo || '' : '', budget: c ? centsToInput(c.budget || 0) : '' };
   const used = S.tx.filter((t) => t.cat === id).length + S.plans.filter((p) => p.cat === id).length;
   openSheet(`<div id="cs-body"></div>`, (el) => {
     const draw = () => {
       $('#cs-body', el).innerHTML = `
-        <div class="cs-head">${catIcon({ color: d.color, icon: d.icon }, 58, 'id="cs-prev"')}<div class="grow"><h2>${c ? 'Kategorie bearbeiten' : k === 'in' ? 'Neue Einnahme-Quelle' : 'Neue Kategorie'}</h2><span class="small">${k === 'in' ? 'Einnahme' : 'Ausgabe'}</span></div></div>
+        <div class="cs-head">${catIcon({ color: d.color, icon: d.icon, photo: d.photo }, 58, 'id="cs-prev"')}<div class="grow"><h2>${c ? 'Kategorie bearbeiten' : k === 'in' ? 'Neue Einnahme-Quelle' : 'Neue Kategorie'}</h2><span class="small">${k === 'in' ? 'Einnahme' : 'Ausgabe'}</span></div></div>
         <label class="field glass"><span class="sr">Name</span>${svg('tag')}<input id="cs-name" placeholder="Name, z. B. Monster" value="${esc(d.name)}" maxlength="24" autocomplete="off"></label>
-        <div class="label">Symbol</div>
+        <div class="label">Eigenes Bild</div>
+        <div class="photo-btns">
+          <label class="btn ghost">${svg('camera')}Kamera<input type="file" accept="image/*" capture="environment" class="sr" data-cphoto></label>
+          <label class="btn ghost">${svg('image')}Galerie<input type="file" accept="image/*" class="sr" data-cphoto></label>
+          ${d.photo ? `<button type="button" class="btn ghost icon-only" id="cs-nophoto" aria-label="Bild entfernen">${svg('trash')}</button>` : ''}
+        </div>
+        <div class="label">Symbol${d.photo ? ' <span class="small">(statt Bild)</span>' : ''}</div>
         <div class="icon-grid">${PICK_ICONS.map((ic) => `<button type="button" class="ig${ic === d.icon ? ' on' : ''}" data-ic="${ic}" aria-label="Symbol ${ic}" style="--c:${d.color}">${svg(ic)}</button>`).join('')}</div>
         <div class="label">Farbe</div>
         <div class="swatches">${COLORS.map((col) => `<button type="button" class="swatch${col === d.color ? ' on' : ''}" data-col="${col}" style="background:${col}" aria-label="Farbe ${col}"></button>`).join('')}</div>
@@ -159,6 +216,12 @@ function catSheet(id, kind, onCreated) {
       const keep = () => { d.name = $('#cs-name', el).value; if ($('#cs-budget', el)) d.budget = $('#cs-budget', el).value; };
       $$('[data-ic]', el).forEach((b) => b.onclick = () => { keep(); d.icon = b.dataset.ic; draw(); });
       $$('[data-col]', el).forEach((b) => b.onclick = () => { keep(); d.color = b.dataset.col; draw(); });
+      $$('[data-cphoto]', el).forEach((inp) => inp.addEventListener('change', async () => {
+        const f = inp.files && inp.files[0]; if (!f) return;
+        keep();
+        try { d.photo = await resizeImage(f, 160); draw(); } catch (e) { toast('Bild konnte nicht geladen werden'); }
+      }));
+      if ($('#cs-nophoto', el)) $('#cs-nophoto', el).onclick = () => { keep(); d.photo = ''; draw(); };
       $('#cs-save', el).onclick = () => {
         keep();
         const name = d.name.trim();
@@ -167,11 +230,11 @@ function catSheet(id, kind, onCreated) {
         closeSheet();
         let newId = null;
         commit(c ? 'Kategorie gespeichert' : name + ' angelegt', () => {
-          if (c) Object.assign(c, { name, icon: d.icon, color: d.color, budget });
+          if (c) { Object.assign(c, { name, icon: d.icon, color: d.color, budget }); if (d.photo) c.photo = d.photo; else delete c.photo; }
           else {
             newId = (k === 'in' ? 'i_' : 'c_') + uid();
             const at = S.cats.findIndex((x) => x.kind === k && /^(c|i)_sonst$/.test(x.id));
-            const cat = { id: newId, kind: k, name, icon: d.icon, color: d.color, budget };
+            const cat = { id: newId, kind: k, name, icon: d.icon, color: d.color, budget }; if (d.photo) cat.photo = d.photo;
             if (at >= 0) S.cats.splice(at, 0, cat); else S.cats.push(cat);
           }
         }, { after: () => { if (newId && onCreated) onCreated(newId); else render(false); } });
@@ -705,3 +768,75 @@ function shareStatus(p) {
     (el) => { $('#sh-copy', el).onclick = async () => { try { await navigator.clipboard.writeText(text); toast('Text kopiert'); closeSheet(); } catch (e) { $('#sh-text', el).select(); toast('Markiert – jetzt kopieren'); } }; });
 }
 const notFoundHTML = () => `<div class="page"><section class="card glass">${emptyHTML('search', 'Nicht gefunden.', '<button type="button" class="btn small-btn" onclick="tabTo(\'start\')">Zur Startseite</button>')}</section></div>`;
+
+/* ================= Sparziele ================= */
+/** Durchschnittliches Monats-Plus der letzten 3 vollen Monate */
+function avgMonthResult() {
+  let sum = 0; let n = 0;
+  for (let i = 1; i <= 3; i++) {
+    const m = addMonth(curMonth(), -i); const r = rangeOf('m' + m); const st = stats(r.from, r.to);
+    if (!st.income && !st.net) continue;
+    sum += st.income - st.net; n++;
+  }
+  return n ? sum / n : 0;
+}
+function goalEta(g) {
+  if (g.saved >= g.target) return ' · geschafft!';
+  const avg = avgMonthResult();
+  if (avg <= 0) return '';
+  const m = Math.ceil((g.target - g.saved) / avg);
+  return m > 60 ? '' : ` · ca. ${m} ${m === 1 ? 'Monat' : 'Monate'}`;
+}
+const GOAL_ICONS = ['target', 'flag', 'car', 'phone', 'gift', 'plane', 'shirt', 'music', 'bike', 'piggy', 'star', 'home', 'ticket'];
+function goalSheet(id) {
+  const g = id ? S.goals.find((x) => x.id === id) : null;
+  const d = { name: g ? g.name : '', icon: g ? g.icon : 'target', color: g ? g.color : COLORS[(S.goals.length + 3) % COLORS.length], target: g ? centsToInput(g.target) : '' };
+  const icons = GOAL_ICONS.filter((ic) => I[ic]);
+  openSheet('<div id="gs-body"></div>', (el) => {
+    const draw = () => {
+      const p = g && g.target ? clamp(Math.round(g.saved / g.target * 100), 0, 100) : 0;
+      $('#gs-body', el).innerHTML = `
+        <div class="cs-head">${catIcon({ color: d.color, icon: d.icon }, 58)}<div class="grow"><h2>${g ? esc(g.name) : 'Neues Sparziel'}</h2><span class="small">${g ? money(g.saved, { force: true }) + ' von ' + money(g.target, { force: true }) + goalEta(g) : 'Wofür sparst du?'}</span></div></div>
+        ${g ? `<div class="bar big"><i style="width:${p}%;background:${g.color}"></i></div>
+        <label class="field glass"><span class="sr">Betrag</span>${svg('coins')}<input id="gs-amt" inputmode="decimal" placeholder="Betrag" autocomplete="off"><span class="unit">€</span></label>
+        <div class="two-btns"><button type="button" class="btn" id="gs-in">${svg('plus')}Einzahlen</button><button type="button" class="btn ghost" id="gs-out">${svg('minus')}Entnehmen</button></div>
+        <p class="small" style="margin:0 2px">Zählt nur für dein Ziel – der Kontostand bleibt gleich.</p>
+        <div class="label">Bearbeiten</div>` : ''}
+        <label class="field glass"><span class="sr">Name</span>${svg('tag')}<input id="gs-name" placeholder="Name, z. B. Führerschein" value="${esc(d.name)}" maxlength="24" autocomplete="off"></label>
+        <label class="field glass"><span class="sr">Ziel</span>${svg('target')}<input id="gs-target" inputmode="decimal" placeholder="Zielbetrag" value="${esc(d.target)}" autocomplete="off"><span class="unit">€</span></label>
+        <div class="icon-grid">${icons.map((ic) => `<button type="button" class="ig${ic === d.icon ? ' on' : ''}" data-gic="${ic}" aria-label="Symbol ${ic}" style="--c:${d.color}">${svg(ic)}</button>`).join('')}</div>
+        <div class="swatches">${COLORS.map((col) => `<button type="button" class="swatch${col === d.color ? ' on' : ''}" data-gcol="${col}" style="background:${col}" aria-label="Farbe ${col}"></button>`).join('')}</div>
+        <button type="button" class="btn${g ? ' ghost' : ''}" id="gs-save">${svg('check')}${g ? 'Änderungen speichern' : 'Ziel anlegen'}</button>
+        ${g ? `<button type="button" class="btn danger" id="gs-del">${svg('trash')}Ziel löschen</button>` : ''}`;
+      const keep = () => { d.name = $('#gs-name', el).value; d.target = $('#gs-target', el).value; };
+      $$('[data-gic]', el).forEach((b) => b.onclick = () => { keep(); d.icon = b.dataset.gic; draw(); });
+      $$('[data-gcol]', el).forEach((b) => b.onclick = () => { keep(); d.color = b.dataset.gcol; draw(); });
+      $('#gs-save', el).onclick = () => {
+        keep();
+        const name = d.name.trim(); const target = parseEur(d.target);
+        if (!name) { $('#gs-name', el).focus(); return; }
+        if (!target) { $('#gs-target', el).focus(); return; }
+        closeSheet();
+        commit(g ? 'Sparziel gespeichert' : name + ' angelegt', () => {
+          if (g) Object.assign(g, { name, icon: d.icon, color: d.color, target });
+          else S.goals.push({ id: uid(), name, icon: d.icon, color: d.color, target, saved: 0 });
+        });
+      };
+      if (g) {
+        const move = (sign) => {
+          const a = parseEur($('#gs-amt', el).value);
+          if (!a) { $('#gs-amt', el).focus(); return; }
+          const before = g.saved;
+          closeSheet();
+          commit(sign > 0 ? `${eur(a)} für ${g.name} zurückgelegt` : `${eur(a)} aus ${g.name} genommen`, () => { g.saved = Math.max(0, g.saved + sign * a); }, {
+            after: () => { render(false); if (sign > 0 && before < g.target && g.saved >= g.target) { burst(innerWidth / 2, innerHeight / 3); toast(g.name + ' geschafft!'); } }
+          });
+        };
+        $('#gs-in', el).onclick = () => move(1);
+        $('#gs-out', el).onclick = () => move(-1);
+        $('#gs-del', el).onclick = () => { closeSheet(); commit(g.name + ' gelöscht', () => { S.goals = S.goals.filter((x) => x.id !== g.id); }); };
+      }
+    };
+    draw();
+  });
+}

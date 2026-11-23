@@ -78,6 +78,7 @@ const I = {
   back: '<path d="m15 18-6-6 6-6"/>',
   next: '<path d="m9 18 6-6-6-6"/>',
   down: '<path d="m6 9 6 6 6-6"/>',
+  undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
   close: '<path d="M6 6l12 12M18 6 6 18"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
   gear: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
@@ -96,6 +97,7 @@ const I = {
   arrowOut: '<path d="M12 19V5M5 12l7-7 7 7"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   send: '<path d="M21 3 10 14"/><path d="M21 3 14.5 21l-4.5-7-7-4.5z"/>',
+  sort: '<path d="M7 4v16M4 7l3-3 3 3M17 20V4M14 17l3 3 3-3"/>',
   target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
   sparkle: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/>',
   camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
@@ -152,13 +154,19 @@ const I = {
   tag: '<path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
   dots: '<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>',
   snack: '<path d="M5 8h14l-1 12H6z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/>',
+  // Energy-Dose mit drei Kratzspuren (eigene Zeichnung, kein Markenlogo)
+  monster: '<path d="M7 5.5C7 4.1 9.2 3 12 3s5 1.1 5 2.5v13c0 1.4-2.2 2.5-5 2.5s-5-1.1-5-2.5z"/><path d="M7 5.5C7 6.9 9.2 8 12 8s5-1.1 5-2.5"/><path d="M9.3 10l.7 2.2-.7 2.2.7 2.4M12 9.6l.7 2.4-.7 2.3.7 2.6M14.7 10l.7 2.2-.7 2.2.7 2.4" stroke-width="1.6"/>',
+  lock: '<rect x="4.5" y="10.5" width="15" height="10.5" rx="3"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15.5" r="1.3"/>',
+  finger: '<path d="M12 11v3.5a6 6 0 0 0 1.2 3.6"/><path d="M8.7 21a9 9 0 0 1-1.7-5.3V11a5 5 0 0 1 10 0v2"/><path d="M4.5 16.5A13 13 0 0 1 4 13v-2a8 8 0 0 1 14.6-4.5M19.6 9.6c.3.8.4 1.6.4 2.4v1.5"/><path d="M17 16.5c0 1.6.4 3 1.1 4"/>',
+  bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
+  flag: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
   anderes: '<circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/>'
 };
 const svg = (name, extra = '') => `<svg viewBox="0 0 24 24" aria-hidden="true" ${extra}>${I[name] || I.tag}</svg>`;
 /** Symbole, die man für Kategorien auswählen kann */
 const PICK_ICONS = ['cart', 'basket', 'bag', 'package', 'can', 'bolt', 'fuel', 'car', 'bus', 'bike', 'ticket', 'gamepad', 'music', 'film', 'tv', 'phone',
   'wifi', 'repeat', 'shirt', 'shoe', 'burger', 'coffee', 'drink', 'pizza', 'croissant', 'gift', 'piggy', 'coins', 'wallet', 'banknote', 'book', 'cap',
-  'school', 'pencil', 'briefcase', 'heart', 'pill', 'dumbbell', 'scissors', 'paw', 'plane', 'home', 'star', 'sparkle', 'tag', 'dots'];
+  'school', 'pencil', 'briefcase', 'heart', 'pill', 'dumbbell', 'scissors', 'paw', 'plane', 'home', 'star', 'sparkle', 'tag', 'dots', 'monster', 'flag'];
 const PRODUCT_ICONS = ['croissant', 'apfel', 'stange', 'schnecke', 'pizza', 'brezel', 'kbrezel', 'broetchen', 'can', 'drink', 'snack'];
 const COLORS = ['#2F6FD6', '#E8902E', '#5FAE3A', '#E0533F', '#8E63D6', '#2A9D96', '#D35D97', '#C99A1E', '#3E8E5E', '#5C6BC0', '#B35C3A', '#8792A6'];
 
@@ -205,6 +213,12 @@ function defaults() {
       privacy: true, privacyLimit: 5000,        // Beträge über 50 € verstecken
       debts: false,                              // optionaler Tab „Schulden“
       jumpHome: true,
+      // Verstecken nur in diesen Zeiten (0 = Sonntag … 6 = Samstag), Aufdecken mit Fingerabdruck
+      hideWin: { 1: [['07:45', '15:30']], 2: [['07:45', '15:30']], 3: [['07:45', '15:30']], 4: [['07:45', '15:30']], 5: [['07:45', '13:15']] },
+      revealBio: true,
+      lock: false, lockDelay: 60,                // App-Sperre mit Fingerabdruck, nach … Sekunden weg
+      remind: true, remindTime: '09:00',         // Erinnerung an fällige geplante Buchungen
+      backupEvery: 0,                            // Backup-Erinnerung: 0 = aus, 7 = wöchentlich, 30 = monatlich
       startBalance: null, startDate: null, startTs: 0,   // Konto (online)
       cashStart: null, cashDate: null, cashTs: 0,        // Bargeld
       lastBackup: null
@@ -213,6 +227,7 @@ function defaults() {
     tx: [],      // {id, kind:'out'|'in'|'refund', amount, cat, title, payee, date, ts, month?(refund), importKey?, planId?}
     plans: [],   // {id, kind:'out'|'in', amount, cat, title, payee, date, repeat:'none'|'monthly', auto:false}
     rules: {},   // Empfänger (klein) → Kategorie, wird beim Import gelernt
+    goals: [],   // Sparziele {id, name, icon, color, target, saved}
     people: [], debts: [], products: defaultProducts()
   };
 }
@@ -275,8 +290,10 @@ function normalize(o) {
   const d = defaults();
   const s = Object.assign({}, d, o);
   s.settings = Object.assign({}, d.settings, o.settings || {});
-  ['cats', 'tx', 'plans', 'people', 'debts', 'products'].forEach((k) => { if (!Array.isArray(s[k])) s[k] = d[k]; });
+  ['cats', 'tx', 'plans', 'people', 'debts', 'products', 'goals'].forEach((k) => { if (!Array.isArray(s[k])) s[k] = d[k] || []; });
   if (!s.rules || typeof s.rules !== 'object') s.rules = {};
+  if (!s.settings.hideWin || typeof s.settings.hideWin !== 'object') s.settings.hideWin = d.settings.hideWin;
+  s.cats.forEach((c) => { if (c.id === 'c_monster' && c.icon === 'can') c.icon = 'monster'; });
   if (!s.cats.some((c) => c.kind === 'out')) s.cats = s.cats.concat(d.cats.filter((c) => c.kind === 'out'));
   if (!s.cats.some((c) => c.kind === 'in')) s.cats = s.cats.concat(d.cats.filter((c) => c.kind === 'in'));
   return s;
@@ -310,6 +327,7 @@ function freshState() {
 }
 function save() {
   if (!store.set(KEY, JSON.stringify(S))) { toast('Speichern hat nicht geklappt – Speicher voll?'); return false; }
+  if (typeof syncNotifications === 'function') syncNotifications();
   return true;
 }
 
@@ -337,7 +355,8 @@ const FALLBACK_CAT = { id: '_', kind: 'out', name: 'Ohne Kategorie', icon: 'tag'
 const catById = (id) => S.cats.find((c) => c.id === id) || FALLBACK_CAT;
 const catsOf = (kind) => S.cats.filter((c) => c.kind === (kind === 'refund' ? 'out' : kind));
 const defaultCatOf = (kind) => { const l = catsOf(kind); return (l.find((c) => c.id === 'c_lidl' && kind !== 'in') || l[0] || FALLBACK_CAT).id; };
-const catIcon = (c, size = 40, extra = '') => `<span class="cat-ic" style="--c:${c.color};width:${size}px;height:${size}px" ${extra}>${svg(c.icon)}</span>`;
+/** Kategorie-Symbol – oder ein eigenes Bild (z. B. ein Logo aus der Galerie) */
+const catIcon = (c, size = 40, extra = '') => `<span class="cat-ic${c.photo ? ' photo' : ''}" style="--c:${c.color};width:${size}px;height:${size}px" ${extra}>${c.photo ? `<img src="${c.photo}" alt="">` : svg(c.icon)}</span>`;
 
 /* ---------- Zeiträume ---------- */
 /** Schlüssel: w2026-11-16 (Woche ab Montag) · m2026-11 · y2026 */
@@ -393,7 +412,9 @@ function stats(from, to) {
 const acctOf = (t) => t.acct || 'online';
 function anchorOf(acct) {
   const st = S.settings;
-  return acct === 'bar' ? { start: st.cashStart, date: st.cashDate, ts: st.cashTs } : { start: st.startBalance, date: st.startDate, ts: st.startTs };
+  // Bargeld startet von selbst bei 0 € (alle Bar-Buchungen zählen), bis du einen Wert einträgst
+  if (acct === 'bar') return st.cashStart == null ? { start: 0, date: '0000-00-00', ts: 0 } : { start: st.cashStart, date: st.cashDate, ts: st.cashTs };
+  return { start: st.startBalance, date: st.startDate, ts: st.startTs };
 }
 function countedIn(t, a) {
   if (a.start == null || !a.date) return false;
@@ -414,7 +435,7 @@ function balanceOf(acct) {
 /** Gesamt = Online + Bar (null, wenn noch nichts eingerichtet ist) */
 function balance() {
   const o = balanceOf('online'); const c = balanceOf('bar');
-  if (o === null && c === null) return null;
+  if (S.settings.startBalance == null && S.settings.cashStart == null && !S.tx.some((t) => acctOf(t) === 'bar' || t.kind === 'transfer')) return null;
   return (o || 0) + (c || 0);
 }
 function setBalanceAnchor(cents, date) {
@@ -436,7 +457,7 @@ function applyAutoPlans() {
   S.plans.forEach((p) => {
     let guard = 0;
     while (p.auto && p.date <= t && guard++ < 36) {
-      S.tx.push({ id: uid(), kind: p.kind, amount: p.amount, cat: p.cat, title: p.title, payee: p.payee || '', date: p.date, ts: Date.now(), planId: p.id, acct: p.acct || 'online' });
+      S.tx.push({ id: uid(), kind: p.kind, amount: p.amount, cat: p.cat, title: p.title, payee: p.payee || '', date: p.date, ts: Date.now(), planId: p.id, acct: p.acct || 'online', planDue: p.date, planSnap: planSnap(p) });
       if (p.repeat === 'monthly') p.date = nextMonthDate(p.date); else { p.done = true; break; }
       changed = true;
     }
@@ -450,11 +471,23 @@ function nextMonthDate(ds) {
 }
 
 /* ---------- Verstecken (Privatsphäre) ---------- */
+/* Versteckt wird nur in den eingestellten Zeitfenstern (z. B. Schulzeit) oder wenn du oben aufs Auge tippst.
+ * Aufdecken per Tippen (in der App mit Fingerabdruck). Verlässt du die App, ist es wieder versteckt. */
 let revealed = false;
+let manualHide = false;
+const nowHM = () => { const d = new Date(); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
+function inHideWindow() {
+  const wins = (S.settings.hideWin || {})[new Date().getDay()] || [];
+  const t = nowHM();
+  return wins.some((w) => w && w[0] && w[1] && w[0] <= t && t < w[1]);
+}
+const hiddenNow = () => !!S.settings.privacy && !revealed && (manualHide || inHideWindow());
+/** Kopie der Plan-Daten, damit ein bestätigter Plan sich wiederherstellen lässt */
+const planSnap = (p) => ({ kind: p.kind, amount: p.amount, cat: p.cat, title: p.title, payee: p.payee || '', acct: p.acct || 'online', repeat: p.repeat || 'none' });
 function isMasked(abs, force) {
-  if (revealed) return false;
+  if (!hiddenNow()) return false;
   if (force) return true;
-  return !!S.settings.privacy && abs > (S.settings.privacyLimit || 5000);
+  return abs > (S.settings.privacyLimit || 0);
 }
 /** Betrag als HTML – bei Bedarf versteckt. o.sign: '+' | '-' | 'auto'; o.force: immer verstecken (Kontostand) */
 function money(c, o = {}) {
@@ -514,4 +547,5 @@ function seedDemo(s) {
   s.created = addMonth(m, -5);
   s.people = [{ id: 'p1', name: 'Lena', color: '#2A9D96' }, { id: 'p2', name: 'Tim', color: '#C99A1E' }];
   s.debts = [{ id: uid(), personId: 'p1', type: 'buy', amount: 168, text: 'Schinken-Käse-Croissant, Laugenbrezel', date: addDays(t, -1), ts: 0 }];
+  s.goals = [{ id: 'g1', name: 'Führerschein', icon: 'car', color: '#2F6FD6', target: 250000, saved: 64000 }];
 }

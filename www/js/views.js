@@ -18,18 +18,17 @@ function balanceCardHTML() {
       <span class="cat-ic" style="--c:var(--accent);width:46px;height:46px">${svg('bank')}</span>
       <span class="grow" style="text-align:left"><span class="b" style="display:block">Kontostand einrichten</span><span class="small">Einmal den echten Kontostand eintragen – danach rechnet die App selbst weiter.</span></span>${svg('next')}</button>`;
   }
-  return `<section class="card glass balance${revealed ? ' open' : ''}" id="bal" role="button" tabindex="0" aria-label="${revealed ? 'Kontostand ' + eur(bal) : 'Kontostand anzeigen'}">
-    <span class="bal-shine" aria-hidden="true"></span>
-    <div class="bal-head"><span class="eyebrow">Kontostand</span><span class="bal-eye">${svg(revealed ? 'eye' : 'eyeOff')}</span></div>
-    <div class="bal-amount${bal < 0 ? ' neg' : ''}">${revealed ? `<span data-count="${bal}">${eur(bal)}</span>` : '<span class="bal-mask">•••,••&nbsp;€</span>'}</div>
-    <div class="bal-hint">${revealed ? 'Gesamt · versteckt sich beim Verlassen' : 'Gesamt · zum Anzeigen tippen'}</div>
-    <div class="bal-split">${['online', 'bar'].map((a) => { const v = balanceOf(a); return `<div class="bal-part">
+  const hid = hiddenNow();
+  const res = st.income - st.net;
+  return `<section class="card glass balance${hid ? ' locked' : ' open'}" id="bal" role="button" tabindex="0" aria-label="${hid ? 'Kontostand anzeigen' : 'Kontostand ' + eur(bal)}">
+    <div class="bal-amount${bal < 0 ? ' neg' : ''}">${hid ? '<span class="bal-mask">•••,••&nbsp;€</span>' : `<span data-count="${bal}">${eur(bal)}</span>`}</div>
+    <div class="bal-split">${['online', 'bar'].map((a) => { const v = balanceOf(a); const unset = a === 'online' && S.settings.startBalance == null; return `<div class="bal-part">
       <span class="bp-ic">${svg(a === 'bar' ? 'banknote' : 'bank')}</span>
-      <span class="bp-txt"><span class="small">${a === 'bar' ? 'Bar' : 'Konto (online)'}</span>${v === null ? `<button type="button" class="link bp-set" data-setbal="${a}">Einrichten</button>` : `<span class="b${v < 0 ? ' neg' : ''}">${money(v, { force: true })}</span>`}</span></div>`; }).join('')}</div>
+      <span class="bp-txt"><span class="small">${a === 'bar' ? 'Bar' : 'Konto (online)'}</span>${unset ? `<button type="button" class="link bp-set" data-setbal="${a}">Einrichten</button>` : `<span class="b${v < 0 ? ' neg' : ''}">${money(v || 0, { force: true })}</span>`}</span></div>`; }).join('')}</div>
     <div class="bal-row">
       <span class="mini pos">${svg('arrowIn')}${money(st.income, { sign: '+' })}</span>
       <span class="mini neg">${svg('arrowOut')}${money(st.net, { sign: '-' })}</span>
-      <span class="mini muted">${MONTHS[+curMonth().slice(5) - 1]}</span>
+      <span class="mini strong ${res >= 0 ? 'pos' : 'neg'}">${res >= 0 ? 'Plus' : 'Minus'} ${money(res, { sign: res >= 0 ? '+' : '-' })}</span>
     </div>
   </section>`;
 }
@@ -39,7 +38,7 @@ function homeChartHTML() {
   return `<section class="card glass chart-card" id="chart-card">
     <div class="between"><h2 class="h2">Ausgaben</h2>${segHTML([['w', 'Woche'], ['m', 'Monat'], ['y', 'Jahr']], homePeriod, 'data-hp', 'aria-label="Zeitraum"')}</div>
     <button type="button" class="donut-btn" id="open-details" aria-label="Alle Details ansehen">
-      ${donutHTML(items, { size: 224, label: r.name, valueHTML: money(st.net), sub: st.refund ? money(st.refund, { sign: '-' }) + ' zurück' : '', emptyText: 'Noch keine Ausgaben', aria: 'Ausgaben nach Kategorie' })}
+      ${donutHTML(items, { size: 236, label: '', valueHTML: money(st.net), sub: st.refund ? money(st.refund, { sign: '-' }) + ' zurück' : '', emptyText: 'Noch keine Ausgaben', aria: 'Ausgaben nach Kategorie' })}
     </button>
     ${items.length ? `<div class="legend">${items.slice(0, 6).map((x, i) => `<button type="button" class="leg" data-cat="${x.cat.id}" style="--i:${i}">${catIcon(x.cat, 32)}<span class="leg-txt"><span class="ell">${esc(x.cat.name)}</span>${money(x.value)}</span></button>`).join('')}</div>` : ''}
     <button type="button" class="link more" id="more-details">Alles ansehen ${svg('next')}</button>
@@ -54,80 +53,142 @@ function bindHomeChart() {
       card.outerHTML = homeChartHTML();
       const nc = $('#chart-card'); nc.classList.add('swap');
       bindHomeChart(); animateDonuts(nc);
+      if (homeSort !== 'new') { $('#home-tx').innerHTML = homeTxHTML(); bindTxRows($('#home-tx')); }
     }, 160);
   });
   const open = () => go('details/' + keyFor(homePeriod));
   $('#open-details').onclick = open; $('#more-details').onclick = open;
   $$('.leg[data-cat]').forEach((b) => b.onclick = () => go('kat/' + b.dataset.cat + '/' + keyFor(homePeriod)));
 }
+/** Letzte Buchungen – oder die größten Ausgaben/Einnahmen im gewählten Zeitraum */
+let homeSort = 'new';
+function homeTxHTML() {
+  let list;
+  if (homeSort === 'new') list = S.tx.slice().sort((a, b) => b.date.localeCompare(a.date) || (b.ts || 0) - (a.ts || 0) || b.id.localeCompare(a.id));
+  else {
+    const r = rangeOf(keyFor(homePeriod));
+    list = S.tx.filter((t) => t.kind === homeSort && t.date >= r.from && t.date <= r.to).sort((a, b) => b.amount - a.amount);
+  }
+  list = list.slice(0, 3);
+  return list.length ? list.map((t, i) => txRow(t, i)).join('') : emptyHTML('list', homeSort === 'new' ? 'Noch keine Buchungen.<br>Tippe unten auf ＋' : 'In diesem Zeitraum nichts.');
+}
+function goalRowHTML(g, i) {
+  const p = g.target ? clamp(Math.round(g.saved / g.target * 100), 0, 100) : 0;
+  return `<button type="button" class="row goal-row" data-goal="${g.id}" style="--i:${i}">${catIcon(g, 44)}
+    <span class="grow"><span class="between"><span class="r-title ell">${esc(g.name)}</span><span class="small b">${p} %</span></span>
+    <span class="bar"><i style="width:${p}%;background:${g.color}"></i></span>
+    <span class="r-sub">${money(g.saved)} von ${money(g.target)}${goalEta(g)}</span></span></button>`;
+}
+function backupDue() {
+  const n = S.settings.backupEvery; if (!n || S.demo) return false;
+  const last = S.settings.lastBackup;
+  return S.tx.length > 5 && (!last || Date.now() - last > n * 864e5);
+}
 VIEWS.start = {
   nav: 'start',
   html() {
     const d = new Date(); const h = d.getHours();
     const greet = h < 11 ? 'Guten Morgen' : h < 18 ? 'Hallo' : 'Guten Abend';
-    const recent = S.tx.slice().sort((a, b) => (b.date + (b.ts || 0)).localeCompare(a.date + (a.ts || 0)) || b.id.localeCompare(a.id)).slice(0, 3);
     const upcoming = S.plans.slice().sort((a, b) => a.date.localeCompare(b.date)).filter((p) => daysBetween(todayStr(), p.date) <= 14).slice(0, 2);
+    const hid = hiddenNow();
     return `<div class="page">
       <header class="hero">
         <div class="grow"><div class="sub">${WD_L[d.getDay()]}, ${d.getDate()}. ${MONTHS[d.getMonth()]}</div><h1>${greet}</h1></div>
         <div class="hero-actions">
-          <button type="button" class="icon-btn glass" id="eye" aria-label="${revealed ? 'Beträge verstecken' : 'Beträge anzeigen'}">${svg(revealed ? 'eye' : 'eyeOff')}</button>
+          <button type="button" class="icon-btn glass" id="eye" aria-label="${hid ? 'Beträge anzeigen' : 'Beträge verstecken'}">${svg(hid ? 'eyeOff' : 'eye')}</button>
           <button type="button" class="icon-btn glass" id="to-settings" aria-label="Einstellungen">${svg('gear')}</button>
         </div>
       </header>
       ${demoBanner()}
+      ${backupDue() ? `<button type="button" class="card glass demo" id="backup-hint"><span class="demo-ic">${svg('download')}</span><span class="grow" style="text-align:left"><span class="b" style="display:block">Zeit für ein Backup</span><span class="small">${S.settings.lastBackup ? 'Letztes vor ' + Math.floor((Date.now() - S.settings.lastBackup) / 864e5) + ' Tagen' : 'Noch nie gesichert'} – tippen zum Speichern</span></span></button>` : ''}
       ${balanceCardHTML()}
       ${homeChartHTML()}
       ${upcoming.length ? `<section class="card glass pad-s">
         <h2 class="h2">Als Nächstes <button type="button" class="link" id="to-plans">Geplant ${svg('next')}</button></h2>
         ${upcoming.map((p, i) => planRowHTML(p, i, true)).join('')}</section>` : ''}
+      ${S.goals.length ? `<section class="card glass pad-s">
+        <h2 class="h2">Sparziele <button type="button" class="link" id="to-goals">Alle ${svg('next')}</button></h2>
+        ${S.goals.slice(0, 2).map((g, i) => goalRowHTML(g, i)).join('')}</section>` : ''}
       <section class="card glass pad-s">
-        <h2 class="h2">Letzte Buchungen <button type="button" class="link" id="to-tx">Alle ${svg('next')}</button></h2>
-        ${recent.length ? recent.map((t, i) => txRow(t, i)).join('') : emptyHTML('list', 'Noch keine Buchungen.<br>Tippe unten auf ＋')}
+        <h2 class="h2">Buchungen <button type="button" class="link" id="to-tx">Alle ${svg('next')}</button></h2>
+        ${segHTML([['new', 'Neueste'], ['out', 'Top Ausgaben'], ['in', 'Top Einnahmen']], homeSort, 'data-hs', 'aria-label="Sortierung"')}
+        <div id="home-tx" style="margin-top:6px">${homeTxHTML()}</div>
       </section>
     </div>`;
   },
   mount() {
     const bal = $('#bal');
     if (bal) {
-      bal.onclick = () => { if (revealed) hideAll(); else revealAll(); };
+      bal.onclick = () => { if (hiddenNow()) requestReveal(); else hideAll(); };
       bal.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); bal.click(); } };
     }
     if ($('#bal-setup')) $('#bal-setup').onclick = () => balanceSheet();
     $$('[data-setbal]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); balanceSheet(); }));
-    $('#eye').onclick = () => { if (revealed) hideAll(); else revealAll(); };
+    $('#eye').onclick = () => { if (hiddenNow()) requestReveal(); else hideAll(); };
     $('#to-settings').onclick = () => go('einstellungen');
     $('#to-tx').onclick = () => tabTo('buchungen');
     if ($('#to-plans')) $('#to-plans').onclick = () => tabTo('geplant');
+    if ($('#to-goals')) $('#to-goals').onclick = () => { goalsJump = true; tabTo('auswertung'); };
+    if ($('#backup-hint')) $('#backup-hint').onclick = () => exportBackup();
     if ($('#demo-clear')) $('#demo-clear').onclick = () => clearDemo();
+    $$('[data-hs]').forEach((b) => b.onclick = () => {
+      if (b.dataset.hs === homeSort) return;
+      segMove(b); homeSort = b.dataset.hs;
+      setTimeout(() => { const c = $('#home-tx'); c.innerHTML = homeTxHTML(); c.classList.remove('swap'); void c.offsetWidth; c.classList.add('swap'); bindTxRows(c); }, 120);
+    });
+    $$('[data-goal]').forEach((b) => b.onclick = () => goalSheet(b.dataset.goal));
     bindHomeChart();
     bindPlanRows();
     bindTxRows($('#view'));
   }
 };
-/* Verstecken / Anzeigen */
+/* Verstecken / Anzeigen (Aufdecken in der App mit Fingerabdruck) */
+let bioBusy = false; let bioEnd = 0;
+/** Fingerabdruck (oder mit pin=true / ohne Fingerabdruck: Handy-PIN). Ohne Sperre am Handy → nie aussperren. */
+async function bioAuth(reason, pin) {
+  const B = isNative() ? plugin('NativeBiometric') : null;
+  if (!B) return true;
+  bioBusy = true;
+  try {
+    const a = await B.isAvailable({ useFallback: true }).catch(() => null);
+    if (!a || !a.isAvailable) return true;
+    const usePin = pin || !a.biometryType || a.biometryType === 7;
+    const o = { reason, title: 'Geld', subtitle: reason, maxAttempts: 5 };
+    if (usePin) o.allowedBiometryTypes = [7]; else o.negativeButtonText = 'Abbrechen';
+    await B.verifyIdentity(o);
+    return true;
+  } catch (e) { return false; } finally { bioBusy = false; bioEnd = Date.now(); }
+}
+function requestReveal() {
+  if (S.settings.revealBio !== false && isNative()) bioAuth('Beträge anzeigen').then((ok) => { if (ok) revealAll(); });
+  else revealAll();
+}
 function revealAll() {
-  revealed = true;
+  revealed = true; manualHide = false;
   render(false);
   const el = $('#bal [data-count]');
   if (el) countUp(el, +el.dataset.count, 800);
-  const b = $('#bal'); if (b) { b.classList.add('pop'); }
 }
-function hideAll() { revealed = false; render(false); }
+function hideAll() { revealed = false; manualHide = true; render(false); }
 document.addEventListener('click', (e) => {
   const t = e.target.closest && e.target.closest('[data-reveal]');
   // Versteckter Betrag in einem Knopf (Diagramm, Zeile): der Knopf macht seine normale Aktion
-  if (t && !t.parentElement.closest('button, a, [role="button"]')) { e.preventDefault(); e.stopPropagation(); revealAll(); }
+  if (t && !t.parentElement.closest('button, a, [role="button"]')) { e.preventDefault(); e.stopPropagation(); requestReveal(); }
 }, true);
 
 /* ================= Buchungen ================= */
-let bMonth = curMonth(); let bFilter = 'all'; let bQuery = '';
+let bKey = keyFor('m'); let bFilter = 'all'; let bQuery = ''; let bSort = 'new';
+const SORT_L = { new: 'Neueste', big: 'Größte', small: 'Kleinste' };
 function txListHTML() {
-  const q = bQuery.trim().toLowerCase();
-  const list = S.tx.filter((t) => monthOf(t.date) === bMonth && (bFilter === 'all' || t.kind === bFilter))
-    .filter((t) => !q || [t.title, t.payee, catById(t.cat).name, centsToInput(t.amount)].join(' ').toLowerCase().includes(q))
-    .sort((a, b) => b.date.localeCompare(a.date) || (b.ts || 0) - (a.ts || 0) || b.id.localeCompare(a.id));
-  if (!list.length) return `<section class="card glass">${emptyHTML('search', q ? 'Nichts gefunden.' : 'Keine Buchungen in diesem Monat.')}</section>`;
+  const q = bQuery.trim().toLowerCase(); const r = rangeOf(bKey);
+  const list = S.tx.filter((t) => t.date >= r.from && t.date <= r.to && (bFilter === 'all' || t.kind === bFilter))
+    .filter((t) => !q || [t.title, t.payee, catById(t.cat).name, centsToInput(t.amount)].join(' ').toLowerCase().includes(q));
+  if (!list.length) return `<section class="card glass">${emptyHTML('search', q ? 'Nichts gefunden.' : 'Keine Buchungen in diesem Zeitraum.')}</section>`;
+  if (bSort !== 'new') {
+    list.sort((a, b) => (bSort === 'big' ? b.amount - a.amount : a.amount - b.amount) || b.date.localeCompare(a.date));
+    return `<section class="card glass pad-s">${list.map((t, i) => txRow(t, i)).join('')}</section>`;
+  }
+  list.sort((a, b) => b.date.localeCompare(a.date) || (b.ts || 0) - (a.ts || 0) || b.id.localeCompare(a.id));
   const groups = [];
   list.forEach((t) => { const g = groups[groups.length - 1]; if (g && g.date === t.date) g.items.push(t); else groups.push({ date: t.date, items: [t] }); });
   let i = 0;
@@ -136,18 +197,20 @@ function txListHTML() {
     return `<section class="card glass pad-s day-card"><h2 class="h2 day-h">${dateLabel(g.date)}<span class="small b ${net >= 0 ? 'pos' : 'neg'}">${money(net, { sign: net >= 0 ? '+' : '-' })}</span></h2>${g.items.map((t) => txRow(t, i++)).join('')}</section>`;
   }).join('');
 }
+function refreshTxList() { const c = $('#tx-list'); c.innerHTML = txListHTML(); c.classList.remove('swap'); void c.offsetWidth; c.classList.add('swap'); bindTxRows(c); }
 VIEWS.buchungen = {
   nav: 'buchungen',
   html() {
-    const r = rangeOf('m' + bMonth); const st = stats(r.from, r.to);
-    const isCur = bMonth === curMonth();
+    const r = rangeOf(bKey); const st = stats(r.from, r.to);
+    const isCur = bKey >= keyFor(bKey[0]);
     return `<div class="page">
       <header class="hero"><div class="grow"><div class="sub">Einnahmen & Ausgaben</div><h1>Buchungen</h1></div>
         <div class="hero-actions"><button type="button" class="icon-btn glass" id="b-import" aria-label="Kontoauszug importieren">${svg('bank')}</button></div></header>
+      ${segHTML([['w', 'Woche'], ['m', 'Monat'], ['y', 'Jahr']], bKey[0], 'data-bp', 'aria-label="Zeitraum"')}
       <div class="month-nav">
-        <button type="button" class="icon-btn sm" id="b-prev" aria-label="Vorheriger Monat">${svg('back')}</button>
-        <span class="b">${monthName(bMonth)}</span>
-        <button type="button" class="icon-btn sm" id="b-next" aria-label="Nächster Monat" ${isCur ? 'disabled' : ''}>${svg('next')}</button>
+        <button type="button" class="icon-btn sm" id="b-prev" aria-label="Zurück">${svg('back')}</button>
+        <span class="b">${r.label || r.name}</span>
+        <button type="button" class="icon-btn sm" id="b-next" aria-label="Weiter" ${isCur ? 'disabled' : ''}>${svg('next')}</button>
       </div>
       <section class="card glass stat3">
         <div><span class="small">Einnahmen</span><span class="pos b">${money(st.income, { sign: '+' })}</span></div>
@@ -155,15 +218,24 @@ VIEWS.buchungen = {
         <div><span class="small">Zurück</span><span class="pos b">${money(st.refund, { sign: '+' })}</span></div>
       </section>
       ${segHTML([['all', 'Alle'], ['out', 'Ausgaben'], ['in', 'Einnahmen'], ['refund', 'Zurück']], bFilter, 'data-bf', 'aria-label="Filter"')}
-      <label class="field glass search"><span class="sr">Suchen</span>${svg('search')}<input id="b-q" type="search" placeholder="Suchen …" value="${esc(bQuery)}" autocomplete="off"></label>
+      <div class="sort-row">
+        <label class="field glass search"><span class="sr">Suchen</span>${svg('search')}<input id="b-q" type="search" placeholder="Suchen …" value="${esc(bQuery)}" autocomplete="off"></label>
+        <button type="button" class="sort-btn glass" id="b-sort" aria-label="Sortierung ändern">${svg('sort')}<span>${SORT_L[bSort]}</span></button>
+      </div>
       <div id="tx-list" class="stack">${txListHTML()}</div>
     </div>`;
   },
   mount() {
-    $('#b-prev').onclick = () => { bMonth = addMonth(bMonth, -1); render(false); };
-    $('#b-next').onclick = () => { if (bMonth < curMonth()) { bMonth = addMonth(bMonth, 1); render(false); } };
+    $('#b-prev').onclick = () => { bKey = shiftKey(bKey, -1); render(false); };
+    $('#b-next').onclick = () => { if (bKey < keyFor(bKey[0])) { bKey = shiftKey(bKey, 1); render(false); } };
     $('#b-import').onclick = () => go('import');
-    $$('[data-bf]').forEach((b) => b.onclick = () => { segMove(b); bFilter = b.dataset.bf; setTimeout(() => { $('#tx-list').innerHTML = txListHTML(); $('#tx-list').classList.remove('swap'); void $('#tx-list').offsetWidth; $('#tx-list').classList.add('swap'); bindTxRows($('#tx-list')); }, 120); });
+    $$('[data-bp]').forEach((b) => b.onclick = () => { if (b.dataset.bp === bKey[0]) return; segMove(b); setTimeout(() => { bKey = keyFor(b.dataset.bp); render(false); }, 160); });
+    $$('[data-bf]').forEach((b) => b.onclick = () => { segMove(b); bFilter = b.dataset.bf; setTimeout(refreshTxList, 120); });
+    $('#b-sort').onclick = () => {
+      bSort = { new: 'big', big: 'small', small: 'new' }[bSort];
+      $('#b-sort span').textContent = SORT_L[bSort];
+      vibrate(8); refreshTxList();
+    };
     $('#b-q').addEventListener('input', (e) => { bQuery = e.target.value; $('#tx-list').innerHTML = txListHTML(); bindTxRows($('#tx-list')); });
     bindTxRows($('#view'));
   }
@@ -258,7 +330,7 @@ VIEWS.kat = {
 };
 
 /* ================= Auswertung (Jahr) ================= */
-let aYear = +todayStr().slice(0, 4);
+let aYear = +todayStr().slice(0, 4); let goalsJump = false;
 VIEWS.auswertung = {
   nav: 'auswertung',
   html() {
@@ -300,8 +372,12 @@ VIEWS.auswertung = {
         ${ys.inList.length ? ys.inList.map((x, i) => `<button type="button" class="row cat-row" data-icat="${x.cat.id}" style="--i:${i}">${catIcon(x.cat, 42)}<span class="grow"><span class="between"><span class="r-title ell">${esc(x.cat.name)}</span><span class="b pos">${money(x.net, { sign: '+' })}</span></span>
           <span class="bar"><i style="width:${Math.round(x.net / Math.max(1, ys.inList[0].net) * 100)}%;background:${x.cat.color}"></i></span></span></button>`).join('') : emptyHTML('coins', 'Noch keine Einnahmen in diesem Jahr.')}
       </section>
+      <section class="card glass pad-s" id="goals">
+        <h2 class="h2">Sparziele <button type="button" class="link" id="g-add">${svg('plus')}Neu</button></h2>
+        ${S.goals.length ? S.goals.map((g, i) => goalRowHTML(g, i)).join('') : emptyHTML('flag', 'Spar auf etwas hin – z. B. Führerschein oder ein neues Handy.', '<button type="button" class="btn small-btn" id="g-add2">Sparziel anlegen</button>')}
+      </section>
       <section class="card glass pad-s">
-        <h2 class="h2">Budgets · ${MONTHS[+curMonth().slice(5) - 1]} <button type="button" class="link" id="y-budgets">Ändern ${svg('next')}</button></h2>
+        <h2 class="h2">Budgets ·${MONTHS[+curMonth().slice(5) - 1]} <button type="button" class="link" id="y-budgets">Ändern ${svg('next')}</button></h2>
         ${budgets.length ? budgets.map((b, i) => {
     const p = Math.round(b.used / b.c.budget * 100); const over = b.used > b.c.budget;
     return `<div class="row budget-row" style="--i:${i}">${catIcon(b.c, 40)}<span class="grow">
@@ -323,6 +399,9 @@ VIEWS.auswertung = {
     $$('.bar-col').forEach((b) => b.onclick = () => go('details/m' + b.dataset.month));
     const tb = () => go('kategorien/out');
     $('#y-budgets').onclick = tb; if ($('#y-budgets2')) $('#y-budgets2').onclick = tb;
+    $('#g-add').onclick = () => goalSheet(); if ($('#g-add2')) $('#g-add2').onclick = () => goalSheet();
+    $$('[data-goal]').forEach((b) => b.onclick = () => goalSheet(b.dataset.goal));
+    if (goalsJump) { goalsJump = false; const g = $('#goals'); if (g) setTimeout(() => g.scrollIntoView({ behavior: motionOn() ? 'smooth' : 'auto', block: 'start' }), 260); }
   }
 };
 
@@ -345,6 +424,12 @@ function planRowHTML(p, i, compact) {
     </div>
   </div>`;
 }
+/** Geplante Buchung jetzt buchen (innerhalb von commit aufrufen) */
+function bookPlan(p) {
+  S.tx.push({ id: uid(), kind: p.kind, amount: p.amount, cat: p.cat, title: p.title, payee: p.payee || '', date: todayStr(), ts: Date.now(), planId: p.id, acct: p.acct || 'online', planDue: p.date, planSnap: planSnap(p) });
+  if (p.repeat === 'monthly') { p.date = nextMonthDate(p.date); while (p.date <= todayStr()) p.date = nextMonthDate(p.date); }
+  else S.plans = S.plans.filter((x) => x.id !== p.id);
+}
 function confirmPlan(id, btn) {
   const p = S.plans.find((x) => x.id === id); if (!p) return;
   const card = btn.closest('[data-plan]');
@@ -352,11 +437,7 @@ function confirmPlan(id, btn) {
   vibrate(20);
   if (card) card.classList.add('done');
   setTimeout(() => {
-    commit(`Gebucht: ${p.title || catById(p.cat).name} ${p.kind === 'in' ? '+' : '−'}${eur(p.amount).replace('−', '')}`, () => {
-      S.tx.push({ id: uid(), kind: p.kind, amount: p.amount, cat: p.cat, title: p.title, payee: p.payee || '', date: todayStr(), ts: Date.now(), planId: p.id, acct: p.acct || 'online' });
-      if (p.repeat === 'monthly') { const q = S.plans.find((x) => x.id === id); q.date = nextMonthDate(q.date); while (q.date <= todayStr()) q.date = nextMonthDate(q.date); }
-      else S.plans = S.plans.filter((x) => x.id !== id);
-    });
+    commit(`Gebucht: ${p.title || catById(p.cat).name} ${p.kind === 'in' ? '+' : '−'}${eur(p.amount).replace('−', '')}`, () => bookPlan(p));
   }, motionOn() ? 420 : 0);
 }
 function planMoreSheet(id) {
@@ -382,15 +463,9 @@ function bindPlanRows(root = document) {
 VIEWS.geplant = {
   nav: 'geplant',
   html() {
-    const t = todayStr();
     const list = S.plans.slice().sort((a, b) => a.date.localeCompare(b.date));
-    const groups = [
-      ['Fällig', list.filter((p) => p.date <= t)],
-      ['Nächste 7 Tage', list.filter((p) => p.date > t && daysBetween(t, p.date) <= 7)],
-      ['Später', list.filter((p) => daysBetween(t, p.date) > 7)]
-    ].filter((g) => g[1].length);
     const bal = balance(); const sum = planSum();
-    let i = 0;
+    const done = doneList();
     return `<div class="page">
       <header class="hero"><div class="grow"><div class="sub">Kommt noch</div><h1>Geplant</h1></div>
         <div class="hero-actions"><button type="button" class="icon-btn glass primary" id="p-add" aria-label="Neue geplante Buchung">${svg('plus')}</button></div></header>
@@ -399,17 +474,49 @@ VIEWS.geplant = {
         <span class="fc-arrow">${svg('next')}</span>
         <div class="fc-col"><span class="small">Wenn alles gebucht ist</span><span class="b ${bal !== null && bal + sum < 0 ? 'neg' : ''}">${bal === null ? money(sum, { sign: sum >= 0 ? '+' : '-' }) : money(bal + sum, { force: true })}</span></div>
       </section>
-      ${groups.length ? groups.map((g) => `<h2 class="section-h">${g[0]}</h2>${g[1].map((p) => planRowHTML(p, i++, false)).join('')}`).join('')
+      ${list.length ? `<div class="stack plan-list">${list.map((p, i) => planRowHTML(p, i, false)).join('')}</div>`
     : `<section class="card glass">${emptyHTML('calendar', 'Nichts geplant.<br>Trag ein, was noch kommt – zum Beispiel Geld vom Förderkurs.', '<button type="button" class="btn small-btn" id="p-add2">Geplante Buchung anlegen</button>')}</section>`}
+      ${done.length ? `<section class="card glass pad-s done-box${doneOpen ? ' open' : ''}" id="done-box">
+        <button type="button" class="done-head" id="done-toggle" aria-expanded="${doneOpen}">${svg('check')}<span class="grow">Erledigt <span class="small">· letzte 7 Tage</span></span><span class="count">${done.length}</span><span class="chev">${svg('next')}</span></button>
+        <div class="done-body"><div>${done.map((t, i) => doneRowHTML(t, i)).join('')}</div></div>
+      </section>` : ''}
     </div>`;
   },
   mount() {
     const add = () => go('neu/plan-out');
     $('#p-add').onclick = add; if ($('#p-add2')) $('#p-add2').onclick = add;
+    if ($('#done-toggle')) $('#done-toggle').onclick = () => { doneOpen = !doneOpen; $('#done-box').classList.toggle('open', doneOpen); $('#done-toggle').setAttribute('aria-expanded', doneOpen); };
+    $$('[data-undo]').forEach((b) => b.onclick = () => restorePlan(b.dataset.undo));
+    $$('[data-dhide]').forEach((b) => b.onclick = () => { const row = b.closest('.done-row'); row.classList.add('gone'); setTimeout(() => commit('Aus der Liste entfernt', () => { const t = S.tx.find((x) => x.id === b.dataset.dhide); if (t) t.doneHidden = true; }), motionOn() ? 260 : 0); });
     bindPlanRows($('#view'));
   }
 };
-
+/* Erledigt (letzte 7 Tage): bestätigte geplante Buchungen – zurück auf geplant oder ausblenden */
+let doneOpen = false;
+function doneList() {
+  const from = addDays(todayStr(), -7);
+  return S.tx.filter((t) => t.planId && !t.doneHidden && t.date >= from).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+}
+function doneRowHTML(t, i) {
+  const c = catById(t.cat); const isIn = t.kind === 'in';
+  return `<div class="done-row" style="--i:${i}">${catIcon(c, 36)}
+    <span class="grow"><span class="r-title ell">${esc(t.title || c.name)}</span><span class="r-sub">${isIn ? 'Erhalten' : 'Bezahlt'} ${dateLabel(t.date).toLowerCase()} · ${money(t.amount, { sign: isIn ? '+' : '-' })}</span></span>
+    <button type="button" class="pbtn" data-undo="${t.id}" aria-label="Zurück auf geplant">${svg('undo')}<span>Zurück</span></button>
+    <button type="button" class="pbtn more" data-dhide="${t.id}" aria-label="Aus der Liste entfernen">${svg('close')}</button>
+  </div>`;
+}
+function restorePlan(txId) {
+  const t = S.tx.find((x) => x.id === txId); if (!t) return;
+  commit('Wieder auf geplant', () => {
+    S.tx = S.tx.filter((x) => x.id !== txId);
+    const due = t.planDue || t.date;
+    const p = S.plans.find((x) => x.id === t.planId);
+    // Automatische Monatsbuchung: nur dieses Mal als einmalige, manuelle Buchung zurücklegen
+    if (p && !(p.auto && p.repeat === 'monthly')) { if (due < p.date) p.date = due; return; }
+    const sn = t.planSnap || { kind: t.kind, amount: t.amount, cat: t.cat, title: t.title, payee: t.payee, acct: acctOf(t), repeat: 'none' };
+    S.plans.push(Object.assign({ id: p ? uid() : t.planId, date: due }, sn, p ? { repeat: 'none' } : {}, { auto: false }));
+  });
+}
 /* ================= Eintragen (Ausgabe · Einnahme · Rückzahlung · Geplant) ================= */
 let F = null;
 const KIND_TITLES = { out: 'Ausgabe', in: 'Einnahme', refund: 'Rückzahlung', transfer: 'Umbuchung' };
@@ -569,7 +676,7 @@ function saveEntry(btn) {
       if (F.editId) { const t = S.tx.find((x) => x.id === F.editId); Object.assign(t, data); if (F.kind !== 'refund') delete t.month; if (F.kind !== 'transfer') delete t.to; }
       else S.tx.push(Object.assign({ id: uid(), ts: Date.now() }, data));
     }
-  }, { after: () => { if (!isPlan) bMonth = monthOf(F.date); goBack(); } });
+  }, { after: () => { if (!isPlan) bKey = keyFor(bKey[0], F.date); goBack(); } });
 }
 function deleteEntry() {
   const isPlan = F.mode === 'plan';

@@ -1,7 +1,7 @@
 // Offline-Speicher: Die App-Dateien werden beim ersten Öffnen auf dem Handy abgelegt.
 // Danach startet die App immer aus dem Speicher; Updates werden im Hintergrund geholt
 // und beim nächsten Start benutzt. Deine Daten liegen NICHT hier, sondern im localStorage.
-const CACHE = 'geld-v3';
+const CACHE = 'geld-v4';
 const FILES = [
   './',
   './index.html',
@@ -14,6 +14,7 @@ const FILES = [
   './build.js',
   './manifest.webmanifest',
   './fonts/PlusJakartaSans.woff2',
+  './fonts/Outfit.woff2',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/maskable-512.png',
