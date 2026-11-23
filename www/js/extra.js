@@ -87,19 +87,26 @@ function clearDemo() {
 
 /* ================= Kontostand ================= */
 function balanceSheet() {
+  const on = balanceOf('online'); const bar = balanceOf('bar');
   const cur = balance();
   openSheet(`<h2>${cur === null ? 'Kontostand einrichten' : 'Kontostand korrigieren'}</h2>
-    <p class="muted" style="margin:0">Schau ins Online-Banking und trag ein, was <b>jetzt</b> auf dem Konto ist. Ab dann rechnet die App alles Neue dazu oder ab.</p>
-    <label class="field glass"><span class="sr">Kontostand in Euro</span>${svg('bank')}<input id="b-amt" inputmode="decimal" placeholder="z. B. 523,40" value="${cur === null ? '' : centsToInput(cur)}"><span class="unit">€</span></label>
+    <p class="muted" style="margin:0">Trag ein, was <b>jetzt</b> auf dem Konto und im Portemonnaie ist. Ab dann rechnet die App alles Neue dazu oder ab. Leer lassen = nicht ändern.</p>
+    <div class="label">Konto (online)</div>
+    <label class="field glass"><span class="sr">Kontostand online in Euro</span>${svg('bank')}<input id="b-amt" inputmode="decimal" placeholder="z. B. 523,40" value="${on === null ? '' : centsToInput(on)}"><span class="unit">€</span></label>
+    <div class="label">Bargeld</div>
+    <label class="field glass"><span class="sr">Bargeld in Euro</span>${svg('banknote')}<input id="b-cash" inputmode="decimal" placeholder="z. B. 35" value="${bar === null ? '' : centsToInput(bar)}"><span class="unit">€</span></label>
     <p class="small" style="margin:0 4px">Bei einem Minus ein „−“ davor schreiben. Was du schon eingetragen hast, bleibt erhalten.</p>
     <button type="button" class="btn" id="b-save">${svg('check')}Speichern</button>`,
   (el) => {
-    setTimeout(() => { const i = $('#b-amt', el); if (i) i.focus(); }, 80);
+    setTimeout(() => { const i = $(on === null ? '#b-amt' : '#b-cash', el); if (i) i.focus(); }, 80);
     $('#b-save', el).onclick = () => {
-      const raw = $('#b-amt', el).value.trim();
-      if (!raw) { $('#b-amt', el).focus(); return; }
+      const raw = $('#b-amt', el).value.trim(); const rawC = $('#b-cash', el).value.trim();
+      if (!raw && !rawC) { $('#b-amt', el).focus(); return; }
       closeSheet();
-      commit('Kontostand gespeichert', () => setBalanceAnchor(parseEur(raw)));
+      commit('Kontostand gespeichert', () => {
+        if (raw && parseEur(raw) !== on) setBalanceAnchor(parseEur(raw));
+        if (rawC && parseEur(rawC) !== bar) setCashAnchor(parseEur(rawC));
+      });
     };
   });
 }
@@ -325,8 +332,9 @@ VIEWS.import = {
             <div class="small ell">${dateLabel(r.date)}${r.purpose ? ' · ' + esc(r.purpose) : ''}</div>
             ${r.dup ? '<span class="pill soft">Schon importiert</span>' : r.match ? `<span class="pill soft">${svg('check')}Schon eingetragen: ${esc(r.match.label)}</span>` : r.plan ? `<span class="pill soft">${svg('calendar')}Bestätigt Geplant: ${esc(r.plan.title || '')}</span>` : `
             <div class="imp-ctrl">
-              ${r.type !== 'out' ? `<select data-kind-i="${i}" aria-label="Art"><option value="in" ${r.kind === 'in' ? 'selected' : ''}>Einnahme</option><option value="refund" ${r.kind === 'refund' ? 'selected' : ''}>Rückzahlung</option></select>` : ''}
-              <select data-cat-i="${i}" aria-label="Kategorie">${opt(r.kind === 'in' ? 'in' : 'out', r.cat)}</select></div>`}
+              ${r.type !== 'out' ? `<select data-kind-i="${i}" aria-label="Art"><option value="in" ${r.kind === 'in' ? 'selected' : ''}>Einnahme</option><option value="refund" ${r.kind === 'refund' ? 'selected' : ''}>Rückzahlung</option><option value="transfer" ${r.kind === 'transfer' ? 'selected' : ''}>Bar eingezahlt</option></select>`
+    : `<select data-kind-i="${i}" aria-label="Art"><option value="out" ${r.kind === 'out' ? 'selected' : ''}>Ausgabe</option><option value="transfer" ${r.kind === 'transfer' ? 'selected' : ''}>Abgehoben → Bar</option></select>`}
+              ${r.kind === 'transfer' ? '' : `<select data-cat-i="${i}" aria-label="Kategorie">${opt(r.kind === 'in' ? 'in' : 'out', r.cat)}</select>`}</div>`}
           </div></div>`).join('')}
       </section>
     </div>
@@ -340,7 +348,7 @@ VIEWS.import = {
     if ($('#use-saldo')) $('#use-saldo').onclick = () => { imp.useSaldo = !imp.useSaldo; render(false); };
     $$('[data-i]').forEach((c) => c.addEventListener('change', () => { imp.rows[+c.dataset.i].on = c.checked; render(false); }));
     $$('[data-cat-i]').forEach((s) => s.addEventListener('change', () => { imp.rows[+s.dataset.catI].cat = s.value; }));
-    $$('[data-kind-i]').forEach((s) => s.addEventListener('change', () => { const r = imp.rows[+s.dataset.kindI]; r.kind = s.value; r.cat = r.kind === 'in' ? guessIncomeCat(r.name + ' ' + r.purpose) : 'c_lidl'; render(false); }));
+    $$('[data-kind-i]').forEach((s) => s.addEventListener('change', () => { const r = imp.rows[+s.dataset.kindI]; r.kind = s.value; r.cat = r.kind === 'in' ? guessIncomeCat(r.name + ' ' + r.purpose) : r.kind === 'out' ? guessOutCat(r.name + ' ' + r.purpose) : 'c_lidl'; render(false); }));
     $('#imp-reset').onclick = () => { imp = null; render(false); };
     $('#imp-go').onclick = () => {
       const sel = imp.rows.filter((r) => r.on);
@@ -349,14 +357,17 @@ VIEWS.import = {
           if (r.match) { const t = S.tx.find((x) => x.id === r.match.id); if (t) { t.importKey = r.key; } return; }
           if (r.plan) {
             const p = S.plans.find((x) => x.id === r.plan.id);
-            S.tx.push({ id: uid(), kind: r.type === 'out' ? 'out' : 'in', amount: r.amount, cat: r.plan.cat, title: r.plan.title, payee: r.plan.payee || r.name, date: r.date, ts: 0, importKey: r.key, planId: r.plan.id });
+            S.tx.push({ id: uid(), kind: r.type === 'out' ? 'out' : 'in', amount: r.amount, cat: r.plan.cat, title: r.plan.title, payee: r.plan.payee || r.name, date: r.date, ts: 0, importKey: r.key, planId: r.plan.id, acct: 'online' });
             if (p) { if (p.repeat === 'monthly') { p.date = nextMonthDate(p.date); } else S.plans = S.plans.filter((x) => x.id !== p.id); }
             return;
           }
-          const t = { id: uid(), kind: r.type === 'out' ? 'out' : r.kind, amount: r.amount, cat: r.cat, title: r.purpose ? r.purpose.slice(0, 40) : '', payee: r.name, date: r.date, ts: 0, importKey: r.key };
+          // Alles aus dem Kontoauszug ist online. Abhebung = vom Konto ins Bargeld, Bareinzahlung = umgekehrt.
+          const t = r.kind === 'transfer'
+            ? { id: uid(), kind: 'transfer', amount: r.amount, cat: null, title: r.type === 'out' ? 'Abgehoben' : 'Eingezahlt', payee: r.name, date: r.date, ts: 0, importKey: r.key, acct: r.type === 'out' ? 'online' : 'bar', to: r.type === 'out' ? 'bar' : 'online' }
+            : { id: uid(), kind: r.kind, amount: r.amount, cat: r.cat, title: r.purpose ? r.purpose.slice(0, 40) : '', payee: r.name, date: r.date, ts: 0, importKey: r.key, acct: 'online' };
           if (t.kind === 'refund') t.month = monthOf(r.date);
           S.tx.push(t);
-          if (r.name && t.kind !== 'refund') S.rules[r.name.toLowerCase()] = r.cat;
+          if (r.name && t.kind !== 'refund' && t.kind !== 'transfer') S.rules[r.name.toLowerCase()] = r.cat;
         });
         if (imp.saldo && imp.useSaldo) setBalanceAnchor(imp.saldo.amount, imp.saldo.date);
       }, { after: () => { imp = null; goBack(); } });
@@ -442,7 +453,10 @@ function parseBankCSV(text) {
     // Schon von Hand eingetragen? (gleicher Betrag, gleiche Richtung, Datum ±4 Tage, noch nicht verknüpft)
     let match = null;
     if (!dup) {
-      const cand = S.tx.find((t) => !t.importKey && !usedTx.has(t.id) && t.amount === amount && ((type === 'out') === (t.kind === 'out')) && Math.abs(daysBetween(t.date, date)) <= 4);
+      // Nur Online-Buchungen können im Kontoauszug stehen (Abhebung zählt als Abgang vom Konto)
+      const isOutOnline = (t) => t.kind === 'out' || (t.kind === 'transfer' && acctOf(t) === 'online');
+      const cand = S.tx.find((t) => !t.importKey && !usedTx.has(t.id) && t.amount === amount && (t.kind === 'transfer' || acctOf(t) === 'online')
+        && (type === 'out' ? isOutOnline(t) : (t.kind === 'in' || t.kind === 'refund' || (t.kind === 'transfer' && t.to === 'online'))) && Math.abs(daysBetween(t.date, date)) <= 4);
       if (cand) { usedTx.add(cand.id); match = { id: cand.id, label: cand.title || cand.payee || catById(cand.cat).name }; }
     }
     // Passt zu einer geplanten Buchung?
@@ -453,7 +467,8 @@ function parseBankCSV(text) {
     }
     const lname = name.toLowerCase();
     const looksRefund = type === 'in' && (refundNames.has(lname) || peopleNames.some((n) => n && lname.includes(n)));
-    const kind = type === 'out' ? 'out' : looksRefund ? 'refund' : 'in';
+    const atm = /geldautomat|bargeld|auszahlung|\bga\b|atm|cash/i.test(name + ' ' + purpose);
+    const kind = atm ? 'transfer' : type === 'out' ? 'out' : looksRefund ? 'refund' : 'in';
     const rule = S.rules[lname];
     const cat = kind === 'in' ? (rule && catById(rule).kind === 'in' ? rule : guessIncomeCat(name + ' ' + purpose))
       : kind === 'refund' ? 'c_lidl' : (rule && catById(rule).kind === 'out' ? rule : guessOutCat(name + ' ' + purpose));
@@ -641,7 +656,7 @@ VIEWS.zahlung = {
       const r = e.currentTarget.getBoundingClientRect(); burst(r.left + r.width / 2, r.top + r.height / 2, ['var(--pos)', '#F2C14E']);
       commit(`${p.name} hat ${eur(amount)} gezahlt`, () => {
         S.debts.push({ id: uid(), personId: p.id, type: 'pay', amount, text: 'Zahlung', date: todayStr(), ts: Date.now() });
-        S.tx.push({ id: uid(), kind: 'refund', amount, cat: zp.cat, title: 'Rückzahlung', payee: p.name, date: todayStr(), ts: Date.now(), month: zp.month });
+        S.tx.push({ id: uid(), kind: 'refund', amount, cat: zp.cat, title: 'Rückzahlung', payee: p.name, date: todayStr(), ts: Date.now(), month: zp.month, acct: 'bar' });
       }, { after: () => goBack() });
     };
   }

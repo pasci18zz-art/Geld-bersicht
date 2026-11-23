@@ -386,11 +386,19 @@ function applyTheme() {
 }
 
 /* ---------- Kleine Bausteine ---------- */
+const ACCT_NAME = { online: 'Konto', bar: 'Bar' };
 function txRow(t, i = 0) {
+  if (t.kind === 'transfer') {
+    const from = ACCT_NAME[acctOf(t)]; const to = ACCT_NAME[t.to || 'bar'];
+    return `<button type="button" class="row tx-row" data-tx="${t.id}" style="--i:${i}">
+      ${catIcon({ color: 'var(--sub)', icon: 'banknote' }, 42)}
+      <span class="grow"><span class="r-title ell">${esc(t.title || (t.to === 'online' ? 'Eingezahlt' : 'Abgehoben'))}</span><span class="r-sub ell">${from} → ${to} · ${dateLabel(t.date)}</span></span>
+      <span class="r-amt zero">${money(t.amount)}</span></button>`;
+  }
   const c = catById(t.cat);
   const isOut = t.kind === 'out';
   const title = t.title || t.payee || c.name;
-  const sub = [t.kind === 'refund' ? (t.payee ? 'von ' + t.payee : 'zurückbekommen') : (t.payee && t.payee !== title ? t.payee : ''), c.name, dateLabel(t.date)].filter(Boolean).join(' · ');
+  const sub = [t.kind === 'refund' ? (t.payee ? 'von ' + t.payee : 'zurückbekommen') : (t.payee && t.payee !== title ? t.payee : ''), c.name, acctOf(t) === 'bar' ? 'Bar' : '', dateLabel(t.date)].filter(Boolean).join(' · ');
   return `<button type="button" class="row tx-row" data-tx="${t.id}" style="--i:${i}">
     <span class="ic-wrap">${catIcon(c, 42)}${t.kind === 'refund' ? `<span class="ic-badge">${svg('refund')}</span>` : ''}</span>
     <span class="grow"><span class="r-title ell">${esc(title)}</span><span class="r-sub ell">${esc(sub)}</span></span>

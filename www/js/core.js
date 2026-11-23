@@ -205,7 +205,8 @@ function defaults() {
       privacy: true, privacyLimit: 5000,        // Beträge über 50 € verstecken
       debts: false,                              // optionaler Tab „Schulden“
       jumpHome: true,
-      startBalance: null, startDate: null, startTs: 0,
+      startBalance: null, startDate: null, startTs: 0,   // Konto (online)
+      cashStart: null, cashDate: null, cashTs: 0,        // Bargeld
       lastBackup: null
     },
     cats: defaultCats(),
@@ -387,22 +388,44 @@ function stats(from, to) {
 /* ---------- Kontostand ---------- */
 /* Anker (Kontostand + Zeitpunkt) + alle Buchungen danach. Eine Buchung zählt, wenn sie nach dem Anker-Tag liegt,
  * oder am Anker-Tag selbst, aber erst danach eingetragen wurde. Importierte Buchungen haben ts = 0. */
-function counted(t) {
+/* Zwei Töpfe: „online“ (Konto, Anker startBalance/startDate/startTs) und „bar“ (Bargeld, Anker cashStart/cashDate/cashTs).
+ * Buchungen ohne acct gelten als online. Umbuchungen (kind 'transfer') gehen von acct nach to. */
+const acctOf = (t) => t.acct || 'online';
+function anchorOf(acct) {
   const st = S.settings;
-  if (st.startBalance == null || !st.startDate) return false;
-  return t.date > st.startDate || (t.date === st.startDate && (t.ts || 0) > (st.startTs || 0));
+  return acct === 'bar' ? { start: st.cashStart, date: st.cashDate, ts: st.cashTs } : { start: st.startBalance, date: st.startDate, ts: st.startTs };
 }
-function balance() {
-  const st = S.settings;
-  if (st.startBalance == null) return null;
-  let b = st.startBalance;
-  S.tx.forEach((t) => { if (counted(t)) b += t.kind === 'out' ? -t.amount : t.amount; });
+function countedIn(t, a) {
+  if (a.start == null || !a.date) return false;
+  return t.date > a.date || (t.date === a.date && (t.ts || 0) > (a.ts || 0));
+}
+function balanceOf(acct) {
+  const a = anchorOf(acct);
+  if (a.start == null) return null;
+  let b = a.start;
+  S.tx.forEach((t) => {
+    if (!countedIn(t, a)) return;
+    if (t.kind === 'transfer') { if (acctOf(t) === acct) b -= t.amount; if ((t.to || 'bar') === acct) b += t.amount; return; }
+    if (acctOf(t) !== acct) return;
+    b += t.kind === 'out' ? -t.amount : t.amount;
+  });
   return b;
+}
+/** Gesamt = Online + Bar (null, wenn noch nichts eingerichtet ist) */
+function balance() {
+  const o = balanceOf('online'); const c = balanceOf('bar');
+  if (o === null && c === null) return null;
+  return (o || 0) + (c || 0);
 }
 function setBalanceAnchor(cents, date) {
   S.settings.startBalance = cents;
   S.settings.startDate = date || todayStr();
   S.settings.startTs = Date.now();
+}
+function setCashAnchor(cents) {
+  S.settings.cashStart = cents;
+  S.settings.cashDate = todayStr();
+  S.settings.cashTs = Date.now();
 }
 const planSum = () => S.plans.reduce((s, p) => s + (p.kind === 'in' ? p.amount : -p.amount), 0);
 
@@ -413,7 +436,7 @@ function applyAutoPlans() {
   S.plans.forEach((p) => {
     let guard = 0;
     while (p.auto && p.date <= t && guard++ < 36) {
-      S.tx.push({ id: uid(), kind: p.kind, amount: p.amount, cat: p.cat, title: p.title, payee: p.payee || '', date: p.date, ts: Date.now(), planId: p.id });
+      S.tx.push({ id: uid(), kind: p.kind, amount: p.amount, cat: p.cat, title: p.title, payee: p.payee || '', date: p.date, ts: Date.now(), planId: p.id, acct: p.acct || 'online' });
       if (p.repeat === 'monthly') p.date = nextMonthDate(p.date); else { p.done = true; break; }
       changed = true;
     }
@@ -483,6 +506,11 @@ function seedDemo(s) {
   s.cats.find((c) => c.id === 'c_monster').budget = 3000;
   s.cats.find((c) => c.id === 'c_amazon').budget = 5000;
   s.settings.startBalance = 48734; s.settings.startDate = addDays(t, -30); s.settings.startTs = 0;
+  // Bargeld: Rückzahlungen kommen bar, einmal am Automaten abgehoben
+  s.tx.forEach((x) => { if (x.kind === 'refund') x.acct = 'bar'; });
+  add('transfer', 4000, null, 'Abgehoben', 'Geldautomat', past(addDays(t, -6)), { acct: 'online', to: 'bar' });
+  add('out', 450, 'c_lidl', 'Brötchen', 'Lidl', past(addDays(t, -3)), { acct: 'bar' });
+  s.settings.cashStart = 2350; s.settings.cashDate = addDays(t, -30); s.settings.cashTs = 0;
   s.created = addMonth(m, -5);
   s.people = [{ id: 'p1', name: 'Lena', color: '#2A9D96' }, { id: 'p2', name: 'Tim', color: '#C99A1E' }];
   s.debts = [{ id: uid(), personId: 'p1', type: 'buy', amount: 168, text: 'Schinken-Käse-Croissant, Laugenbrezel', date: addDays(t, -1), ts: 0 }];
