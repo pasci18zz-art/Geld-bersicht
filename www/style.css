@@ -740,3 +740,7 @@ button.ln-amt small { margin-right: 6px; }
 .perf-add svg { width: 16px; height: 16px; }
 .ln.got { opacity: .65; }
 .ln.got .ln-x { color: var(--pos); }
+
+/* Wischen: Nachbarseite liegt fertig daneben */
+#peek { position: fixed; inset: 0; z-index: 1; overflow: hidden; pointer-events: none; }
+.peek-inner { position: absolute; will-change: transform; }

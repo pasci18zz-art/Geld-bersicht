@@ -109,7 +109,7 @@ function animateDonuts(root = document) {
   const arcs = $$('.seg-arc', root);
   if (!arcs.length) return;
   const run = () => arcs.forEach((a) => { a.style.strokeDasharray = `${a.dataset.len} ${a.dataset.c}`; });
-  if (!motionOn()) { arcs.forEach((a) => { a.style.transition = 'none'; }); run(); return; }
+  if (!motionOn() || swInstant) { arcs.forEach((a) => { a.style.transition = 'none'; }); run(); return; }
   requestAnimationFrame(() => requestAnimationFrame(run));
 }
 /** Balken: 12 Monate, Einnahmen und Ausgaben nebeneinander */
@@ -312,63 +312,128 @@ function onScroll() {
 }
 window.addEventListener('scroll', onScroll, { passive: true });
 
-/* ---------- Wischen zwischen den Haupt-Seiten ---------- */
-let sw = null; let swRaf = 0; let swX = 0;
+/* ---------- Wischen zwischen den Haupt-Seiten ----------
+   Die Seite folgt dem Finger 1:1, die Nachbarseite schiebt sich sichtbar mit herein, die Leiste unten wandert mit.
+   Beim Loslassen entscheiden Weg und Schwung; die fertig gezeichnete Nachbarseite wird ohne Neuaufbau übernommen. */
+let sw = null; let swRaf = 0; let swBusy = false; let swClickBlock = 0; let swInstant = false;
 function tabTarget(dx) {
   const order = TAB_ORDER(); const i = order.indexOf(route().name);
   const t = i + (dx < 0 ? 1 : -1);
   return i >= 0 && t >= 0 && t < order.length ? order[t] : null;
 }
 function resetSwipeStyles() {
-  const v = $('#view');
-  v.style.transition = ''; v.style.transform = ''; v.style.opacity = ''; v.style.willChange = '';
+  const p = $('#view > .page'); if (p) { p.style.transition = ''; p.style.transform = ''; p.style.willChange = ''; }
+  const pill = $('#nav .nav-pill'); if (pill) pill.style.transition = '';
+}
+/** Nachbarseite fertig gezeichnet daneben legen (oben angefangen, wie nach dem Wechsel) */
+function makePeek(name) {
+  const v = VIEWS[name]; if (!v) return null;
+  const view = $('#view'); const r = view.getBoundingClientRect();
+  const peek = document.createElement('div'); peek.id = 'peek'; peek.setAttribute('aria-hidden', 'true');
+  const inner = document.createElement('div'); inner.className = 'peek-inner';
+  inner.style.top = (r.top + window.scrollY) + 'px'; inner.style.left = r.left + 'px'; inner.style.width = r.width + 'px';
+  try { inner.innerHTML = v.html(''); } catch (e) { return null; }
+  $$('.seg-arc', inner).forEach((a) => { a.style.transition = 'none'; a.style.strokeDasharray = `${a.dataset.len} ${a.dataset.c}`; });
+  peek.appendChild(inner); document.body.appendChild(peek);
+  return inner;
+}
+function navGeom(name) {
+  const b = $(`#nav .nav-tab[data-tab="${name}"]`);
+  return b ? { x: b.offsetLeft, w: b.offsetWidth } : null;
 }
 function paintSwipe() {
   swRaf = 0;
   if (!sw || sw.lock !== 'h') return;
-  const has = !!tabTarget(swX);
-  const v = $('#view');
-  v.style.transform = `translate3d(${(swX * (has ? 0.5 : 0.12)).toFixed(1)}px,0,0)`;
+  const W = sw.W; let dx = sw.dx;
+  const dir = dx < 0 ? 'next' : 'prev';
+  if (dir !== sw.dir) { // Richtung gewechselt → andere Nachbarseite
+    sw.dir = dir;
+    const old = $('#peek'); if (old) old.remove();
+    sw.target = tabTarget(dx); sw.peek = sw.target ? makePeek(sw.target) : null;
+    sw.g1 = navGeom(sw.target);
+  }
+  if (!sw.target) dx = dx / (1 + Math.abs(dx) / 90) * 0.6; // am Rand: Gummiband
+  const page = $('#view > .page');
+  if (page) page.style.transform = `translate3d(${dx.toFixed(1)}px,0,0)`;
+  if (sw.peek) sw.peek.style.transform = `translate3d(${(dx + (dx < 0 ? W : -W)).toFixed(1)}px,0,0)`;
+  // Leiste unten: Markierung gleitet anteilig zum Ziel
+  const pill = $('#nav .nav-pill');
+  if (pill && sw.g0 && sw.g1) {
+    const p = Math.min(1, Math.abs(dx) / W);
+    pill.style.transition = 'none';
+    pill.style.width = (sw.g0.w + (sw.g1.w - sw.g0.w) * p).toFixed(1) + 'px';
+    pill.style.transform = `translateX(${(sw.g0.x + (sw.g1.x - sw.g0.x) * p).toFixed(1)}px)`;
+  }
+  const over = sw.target && Math.abs(dx) > W * 0.33;
+  if (over !== sw.over) { sw.over = over; if (over) vibrate(6); }
+}
+function finishSwipe(commit) {
+  const s = sw; sw = null; if (!s) return;
+  if (swRaf) { cancelAnimationFrame(swRaf); swRaf = 0; }
+  const page = $('#view > .page'); const peek = s.peek; const W = s.W;
+  const from = s.target ? s.dx : s.dx / (1 + Math.abs(s.dx) / 90) * 0.6;
+  const to = commit ? (s.dx < 0 ? -W : W) : 0;
+  const rest = Math.abs(to - from);
+  const ms = motionOn() ? Math.round(Math.max(150, Math.min(340, rest / Math.max(1.1, Math.abs(s.v) * 1.15)))) : 0;
+  const ease = `transform ${ms}ms cubic-bezier(.22,.8,.3,1)`;
+  swBusy = true;
+  if (page) { page.style.transition = ease; page.style.transform = `translate3d(${to}px,0,0)`; }
+  if (peek) { peek.style.transition = ease; peek.style.transform = `translate3d(${to + (s.dx < 0 ? W : -W)}px,0,0)`; }
+  const pill = $('#nav .nav-pill');
+  if (pill) { pill.style.transition = `transform ${ms}ms cubic-bezier(.22,.8,.3,1), width ${ms}ms cubic-bezier(.22,.8,.3,1)`; const g = commit ? s.g1 : s.g0; if (g) { pill.style.width = g.w + 'px'; pill.style.transform = `translateX(${g.x}px)`; } }
+  setTimeout(() => {
+    if (commit) {
+      // Neue Seite übernehmen: gleich aussehend, ohne Einflug-Animation
+      closeSheetNow();
+      stack = [s.target]; scrollMem = {}; navDir = 'none'; swInstant = true;
+      window.scrollTo(0, 0);
+      render(false);
+      swInstant = false;
+    } else resetSwipeStyles();
+    const p = $('#peek'); if (p) p.remove();
+    swBusy = false;
+  }, ms + 20);
 }
 function bindSwipe() {
   const v = $('#view');
+  // Klick direkt nach einem Wisch nicht als Tippen werten
+  document.addEventListener('click', (e) => { if (Date.now() < swClickBlock) { e.preventDefault(); e.stopPropagation(); } }, true);
   v.addEventListener('pointerdown', (e) => {
+    if (sw && sw.lock === 'h') return;
     sw = null;
-    if (e.pointerType === 'mouse' || !e.isPrimary || sheetOpen()) return;
+    if (swBusy || e.pointerType === 'mouse' || !e.isPrimary || sheetOpen()) return;
     const r = route();
     if (!TAB_ORDER().includes(r.name) || r.arg) return;
     if (e.target.closest && e.target.closest('input, select, textarea, .no-swipe, .hscroll')) return;
-    sw = { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now(), lock: null, dx: 0 };
+    sw = { id: e.pointerId, x0: e.clientX, y0: e.clientY, lock: null, dx: 0, v: 0, pts: [], dir: null, W: window.innerWidth, g0: navGeom(route().name) };
   }, { passive: true });
   v.addEventListener('pointermove', (e) => {
     if (!sw || e.pointerId !== sw.id) return;
-    const dx = e.clientX - sw.x; const dy = e.clientY - sw.y;
+    const dx = e.clientX - sw.x0; const dy = e.clientY - sw.y0;
     if (sw.lock === null) {
-      if (Math.hypot(dx, dy) < 12) return;
-      sw.lock = Math.abs(dx) > Math.abs(dy) * 1.4 ? 'h' : 'v';
-      if (sw.lock === 'h') { try { v.setPointerCapture(e.pointerId); } catch (_) { /* egal */ } v.style.willChange = 'transform'; v.style.transition = 'none'; }
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      sw.lock = Math.abs(dx) > Math.abs(dy) * 1.15 ? 'h' : 'v';
+      if (sw.lock !== 'h') { sw = null; return; }
+      try { v.setPointerCapture(e.pointerId); } catch (_) { /* egal */ }
+      sw.x0 = e.clientX; // ab hier 1:1, ohne Sprung
+      const page = $('#view > .page'); if (page) { page.style.transition = 'none'; page.style.willChange = 'transform'; }
     }
-    if (sw.lock !== 'h') return;
-    sw.dx = dx; swX = dx;
+    sw.dx = e.clientX - sw.x0;
+    const now = performance.now(); sw.pts.push({ t: now, x: e.clientX });
+    while (sw.pts.length > 2 && now - sw.pts[0].t > 90) sw.pts.shift();
     if (!swRaf) swRaf = requestAnimationFrame(paintSwipe);
   }, { passive: true });
   const end = (e) => {
-    const s = sw; sw = null;
-    if (!s || s.lock !== 'h') return;
-    if (swRaf) { cancelAnimationFrame(swRaf); swRaf = 0; }
-    const dx = s.dx; const fast = Date.now() - s.t < 260;
-    const target = tabTarget(dx);
-    const ok = e.type !== 'pointercancel' && target && (Math.abs(dx) > 80 || (Math.abs(dx) > 40 && fast));
-    if (ok) {
-      v.style.transition = 'transform .12s ease-in';
-      v.style.transform = `translate3d(${dx < 0 ? -60 : 60}px,0,0)`;
-      vibrate(8);
-      setTimeout(() => tabTo(target, dx < 0 ? 'tab-l' : 'tab-r'), 110);
-    } else {
-      v.style.transition = 'transform .3s cubic-bezier(.2,1.3,.4,1)';
-      v.style.transform = '';
-      setTimeout(resetSwipeStyles, 320);
-    }
+    if (!sw || e.pointerId !== sw.id) return;
+    if (sw.lock !== 'h') { sw = null; return; }
+    const pts = sw.pts; const a = pts[0]; const b = pts[pts.length - 1];
+    sw.v = a && b && b.t > a.t ? (b.x - a.x) / (b.t - a.t) : 0; // px/ms
+    swClickBlock = Date.now() + 350;
+    if (sw.dir === null) paintSwipe();
+    const fling = Math.abs(sw.v) > 0.35 && Math.sign(sw.v) === Math.sign(sw.dx) && Math.abs(sw.dx) > 24;
+    const commit = e.type !== 'pointercancel' && !!sw.target && (Math.abs(sw.dx) > sw.W * 0.33 || fling);
+    if (commit) vibrate(8);
+    finishSwipe(commit);
   };
   v.addEventListener('pointerup', end, { passive: true });
   v.addEventListener('pointercancel', end, { passive: true });
