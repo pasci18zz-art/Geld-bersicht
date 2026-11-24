@@ -57,7 +57,7 @@ function segMove(btn) {
 /* ---------- Zahlenfeld ---------- */
 function keypadHTML() {
   return `<div class="keypad">${['1', '2', '3', '4', '5', '6', '7', '8', '9', ',', '0', 'del'].map((k) =>
-    `<button type="button" class="key" data-key="${k}" aria-label="${k === 'del' ? 'Löschen' : k === ',' ? 'Komma' : k}">${k === 'del' ? svg('back') : k}</button>`).join('')}</div>`;
+    `<button type="button" class="key" data-key="${k}" aria-label="${k === 'del' ? 'Löschen' : k === ',' ? 'Komma' : k}">${k === 'del' ? svg('bksp') : k}</button>`).join('')}</div>`;
 }
 function pressKey(str, k) {
   if (k === 'del') return str.slice(0, -1);

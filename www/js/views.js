@@ -89,7 +89,7 @@ VIEWS.start = {
   html() {
     const d = new Date(); const h = d.getHours();
     const greet = h < 11 ? 'Guten Morgen' : h < 18 ? 'Hallo' : 'Guten Abend';
-    const upcoming = S.plans.slice().sort((a, b) => a.date.localeCompare(b.date)).filter((p) => daysBetween(todayStr(), p.date) <= 14).slice(0, 2);
+    const upcoming = S.plans.filter((p) => p.date && daysBetween(todayStr(), p.date) <= 14).sort(planOrder).slice(0, 2);
     const hid = hiddenNow();
     return `<div class="page">
       <header class="hero">
@@ -407,13 +407,13 @@ VIEWS.auswertung = {
 
 /* ================= Geplant ================= */
 function planRowHTML(p, i, compact) {
-  const c = catById(p.cat); const isIn = p.kind === 'in';
-  const n = daysBetween(todayStr(), p.date);
+  const c = catById(p.cat); const isIn = p.kind !== 'out';
+  const n = p.date ? daysBetween(todayStr(), p.date) : 0;
   return `<div class="plan${compact ? ' compact' : ' card glass'}${n < 0 ? ' late' : ''}" data-plan="${p.id}" style="--i:${i}">
     ${catIcon(c, 42)}
     <div class="grow">
-      <div class="r-title ell">${esc(p.title || c.name)}</div>
-      <div class="r-sub">${p.payee ? (isIn ? 'von ' : 'an ') + esc(p.payee) + ' · ' : ''}<span class="due">${dueLabel(p.date)}</span>${p.repeat === 'monthly' ? ` · <span class="tag-mini">${svg('repeat')}monatlich</span>` : ''}</div>
+      <div class="r-title ell">${p.kind === 'refund' ? (p.payee ? esc(p.payee) : 'Rückzahlung') : esc(p.title || c.name)}</div>
+      <div class="r-sub">${p.kind === 'refund' ? `${svg('undo')} ${esc(c.name)} · ` : p.payee ? (isIn ? 'von ' : 'an ') + esc(p.payee) + ' · ' : ''}<span class="due">${dueLabel(p.date)}</span>${p.repeat === 'monthly' ? ` · <span class="tag-mini">${svg('repeat')}monatlich</span>` : ''}</div>
     </div>
     <div class="plan-side">
       <span class="r-amt ${isIn ? 'pos' : 'neg'}">${money(p.amount, { sign: isIn ? '+' : '-' })}</span>
@@ -426,18 +426,21 @@ function planRowHTML(p, i, compact) {
 }
 /** Geplante Buchung jetzt buchen (innerhalb von commit aufrufen) */
 function bookPlan(p) {
-  S.tx.push({ id: uid(), kind: p.kind, amount: p.amount, cat: p.cat, title: p.title, payee: p.payee || '', date: todayStr(), ts: Date.now(), planId: p.id, acct: p.acct || 'online', planDue: p.date, planSnap: planSnap(p) });
+  const t = { id: uid(), kind: p.kind, amount: p.amount, cat: p.cat, title: p.title || (p.kind === 'refund' ? 'Rückzahlung' : ''), payee: p.payee || '', date: todayStr(), ts: Date.now(), planId: p.id, acct: p.acct || (p.kind === 'refund' ? 'bar' : 'online'), planDue: p.date || null, planSnap: planSnap(p) };
+  if (p.kind === 'refund') t.month = p.month || curMonth();
+  if (p.lines) t.lines = p.lines;
+  S.tx.push(t);
   if (p.repeat === 'monthly') { p.date = nextMonthDate(p.date); while (p.date <= todayStr()) p.date = nextMonthDate(p.date); }
   else S.plans = S.plans.filter((x) => x.id !== p.id);
 }
 function confirmPlan(id, btn) {
   const p = S.plans.find((x) => x.id === id); if (!p) return;
   const card = btn.closest('[data-plan]');
-  const r = btn.getBoundingClientRect(); burst(r.left + r.width / 2, r.top + r.height / 2, p.kind === 'in' ? ['var(--pos)', '#F2C14E', '#2F6FD6'] : undefined);
+  const r = btn.getBoundingClientRect(); burst(r.left + r.width / 2, r.top + r.height / 2, p.kind !== 'out' ? ['var(--pos)', '#F2C14E', '#2F6FD6'] : undefined);
   vibrate(20);
   if (card) card.classList.add('done');
   setTimeout(() => {
-    commit(`Gebucht: ${p.title || catById(p.cat).name} ${p.kind === 'in' ? '+' : '−'}${eur(p.amount).replace('−', '')}`, () => bookPlan(p));
+    commit(`Gebucht: ${p.title || catById(p.cat).name} ${p.kind === 'out' ? '−' : '+'}${eur(p.amount).replace('−', '')}`, () => bookPlan(p));
   }, motionOn() ? 420 : 0);
 }
 function planMoreSheet(id) {
@@ -445,12 +448,12 @@ function planMoreSheet(id) {
   openSheet(`<h2>${esc(p.title || catById(p.cat).name)}</h2>
     <p class="muted" style="margin:0">${dueLabel(p.date)} · ${eur(p.amount)}</p>
     <button type="button" class="btn ghost" id="pm-edit">${svg('edit')}Bearbeiten</button>
-    <button type="button" class="btn ghost" id="pm-later">${svg('clock')}Eine Woche später</button>
+    ${p.date ? `<button type="button" class="btn ghost" id="pm-later">${svg('clock')}Eine Woche später</button>` : ''}
     ${p.repeat === 'monthly' ? `<button type="button" class="btn ghost" id="pm-skip">${svg('next')}Diesmal überspringen</button>` : ''}
     <button type="button" class="btn danger" id="pm-del">${svg('trash')}${p.repeat === 'monthly' ? 'Ganz löschen' : 'Fällt weg – löschen'}</button>`,
   (el) => {
     $('#pm-edit', el).onclick = () => go('neu/p' + id);
-    $('#pm-later', el).onclick = () => { closeSheet(); commit('Um eine Woche verschoben', () => { p.date = addDays(p.date, 7); }); };
+    if ($('#pm-later', el)) $('#pm-later', el).onclick = () => { closeSheet(); commit('Um eine Woche verschoben', () => { p.date = addDays(p.date, 7); }); };
     if ($('#pm-skip', el)) $('#pm-skip', el).onclick = () => { closeSheet(); commit('Diesmal übersprungen', () => { p.date = nextMonthDate(p.date); }); };
     $('#pm-del', el).onclick = () => { closeSheet(); commit('Geplante Buchung gelöscht', () => { S.plans = S.plans.filter((x) => x.id !== id); }); };
   });
@@ -463,7 +466,7 @@ function bindPlanRows(root = document) {
 VIEWS.geplant = {
   nav: 'geplant',
   html() {
-    const list = S.plans.slice().sort((a, b) => a.date.localeCompare(b.date));
+    const list = S.plans.slice().sort(planOrder);
     const bal = balance(); const sum = planSum();
     const done = doneList();
     return `<div class="page">
@@ -498,7 +501,7 @@ function doneList() {
   return S.tx.filter((t) => t.planId && !t.doneHidden && t.date >= from).sort((a, b) => (b.ts || 0) - (a.ts || 0));
 }
 function doneRowHTML(t, i) {
-  const c = catById(t.cat); const isIn = t.kind === 'in';
+  const c = catById(t.cat); const isIn = t.kind !== 'out';
   return `<div class="done-row" style="--i:${i}">${catIcon(c, 36)}
     <span class="grow"><span class="r-title ell">${esc(t.title || c.name)}</span><span class="r-sub">${isIn ? 'Erhalten' : 'Bezahlt'} ${dateLabel(t.date).toLowerCase()} · ${money(t.amount, { sign: isIn ? '+' : '-' })}</span></span>
     <button type="button" class="pbtn" data-undo="${t.id}" aria-label="Zurück auf geplant">${svg('undo')}<span>Zurück</span></button>
@@ -509,29 +512,67 @@ function restorePlan(txId) {
   const t = S.tx.find((x) => x.id === txId); if (!t) return;
   commit('Wieder auf geplant', () => {
     S.tx = S.tx.filter((x) => x.id !== txId);
-    const due = t.planDue || t.date;
+    const due = t.planDue !== undefined ? t.planDue : t.date;
     const p = S.plans.find((x) => x.id === t.planId);
     // Automatische Monatsbuchung: nur dieses Mal als einmalige, manuelle Buchung zurücklegen
-    if (p && !(p.auto && p.repeat === 'monthly')) { if (due < p.date) p.date = due; return; }
+    if (p && !(p.auto && p.repeat === 'monthly')) { if (due && due < p.date) p.date = due; return; }
     const sn = t.planSnap || { kind: t.kind, amount: t.amount, cat: t.cat, title: t.title, payee: t.payee, acct: acctOf(t), repeat: 'none' };
     S.plans.push(Object.assign({ id: p ? uid() : t.planId, date: due }, sn, p ? { repeat: 'none' } : {}, { auto: false }));
   });
 }
-/* ================= Eintragen (Ausgabe · Einnahme · Rückzahlung · Geplant) ================= */
+/* ================= Eintragen (Ausgabe · Einnahme · Rückzahlung · Umbuchen · Geplant) ================= */
+/* Ausgabe = Kassenzettel: + neue Zeile, × Anzahl, − „Bekomme ich zurück“ (landet als offene Rückzahlung in Geplant) */
 let F = null;
 const KIND_TITLES = { out: 'Ausgabe', in: 'Einnahme', refund: 'Rückzahlung', transfer: 'Umbuchung' };
 const fSign = () => (F.kind === 'out' ? { s: '−', c: 'neg' } : F.kind === 'transfer' ? { s: '', c: 'zero' } : { s: '+', c: 'pos' });
+const fIsPlan = () => F.mode === 'plan' || F.plan;
+const fItems = () => F.lines.reduce((s, l) => s + l.qty * l.c, 0) + (F.lmode === 'item' ? F.qty * parseEur(F.buf) : 0);
+const fBacks = () => F.backs.reduce((s, b) => s + b.c, 0) + (F.lmode === 'back' ? parseEur(F.buf) : 0);
+const fAmount = () => (F.kind === 'out' ? fItems() : parseEur(F.amt));
+const fSlip = () => F.kind === 'out' && (F.lines.length > 0 || F.backs.length > 0 || F.lmode === 'back');
+function commitLine() {
+  const c = parseEur(F.buf);
+  if (c > 0) { if (F.lmode === 'item') F.lines.push({ name: '', qty: F.qty, c }); else F.backs.push({ who: '', c }); }
+  F.buf = ''; F.qty = 1;
+}
+function slipKey(k) {
+  if (/^\d$/.test(k) || k === ',') F.buf = pressKey(F.buf, k);
+  else if (k === 'del') {
+    if (F.buf) F.buf = F.buf.slice(0, -1);
+    else if (F.qty > 1) F.qty = 1;
+    else if (F.lmode === 'back') { if (F.backs.length) F.backs.pop(); else F.lmode = 'item'; }
+    else if (F.lines.length) { const l = F.lines.pop(); F.buf = centsToInput(l.c); F.qty = l.qty; }
+  } else if (k === 'C') { F.buf = ''; F.qty = 1; }
+  else if (k === 'x') { const n = parseInt(F.buf, 10); if (F.lmode === 'item' && F.buf && !F.buf.includes(',') && n >= 2 && n <= 99) { F.qty = n; F.buf = ''; } }
+  else if (k === 'plus') { commitLine(); F.lmode = 'item'; }
+  else if (k === 'minus') { commitLine(); F.lmode = 'back'; }
+}
+/** Namen vorschlagen: zuletzt benutzte zuerst, passend zu den getippten Buchstaben, höchstens 4 */
+function nameSuggest(pool, val, exclude = []) {
+  const v = (val || '').trim().toLowerCase(); const seen = new Set(); const out = [];
+  pool.forEach((n) => { n = (n || '').trim(); const k = n.toLowerCase(); if (!n || seen.has(k)) return; seen.add(k); out.push(n); });
+  return out.filter((n) => !exclude.includes(n) && n.toLowerCase() !== v && (!v || n.toLowerCase().includes(v)))
+    .sort((a, b) => (b.toLowerCase().startsWith(v) ? 1 : 0) - (a.toLowerCase().startsWith(v) ? 1 : 0)).slice(0, 4);
+}
+const recentTx = () => S.tx.slice().sort((a, b) => b.date.localeCompare(a.date) || (b.ts || 0) - (a.ts || 0));
+const personPool = () => recentTx().filter((t) => t.kind === 'refund').map((t) => t.payee)
+  .concat(S.plans.filter((p) => p.kind === 'refund').map((p) => p.payee), S.people.map((p) => p.name));
+const payeePool = () => (F.kind === 'refund' ? personPool() : recentTx().filter((t) => t.kind === F.kind).map((t) => t.payee));
+const suggHTML = (list, attr) => list.map((n) => `<button type="button" class="sg" ${attr}="${esc(n)}">${esc(n)}</button>`).join('');
+
 VIEWS.neu = {
   nav: null,
   init(arg) {
     const t = todayStr();
-    F = { mode: 'tx', editId: null, kind: 'out', amt: '', cat: null, payee: '', title: '', date: t, month: curMonth(), plan: false, repeat: false, acct: 'online', acctSet: false };
+    F = { mode: 'tx', editId: null, kind: 'out', amt: '', cat: null, payee: '', title: '', date: t, month: curMonth(), plan: false, repeat: false, acct: 'online', acctSet: false,
+      open: null, lines: [], backs: [], lmode: 'item', buf: '', qty: 1 };
+    const loadOut = (x) => { if (x.lines && x.lines.length) F.lines = x.lines.map((l) => Object.assign({}, l)); else F.buf = centsToInput(x.amount); };
     if (arg[0] === 'e') {
       const x = S.tx.find((q) => q.id === arg.slice(1));
-      if (x) Object.assign(F, { editId: x.id, kind: x.kind, amt: centsToInput(x.amount), cat: x.cat, payee: x.payee || '', title: x.title || '', date: x.date, month: x.month || monthOf(x.date), acct: acctOf(x), acctSet: true });
+      if (x) { Object.assign(F, { editId: x.id, kind: x.kind, amt: centsToInput(x.amount), cat: x.cat, payee: x.payee || '', title: x.title || '', date: x.date, month: x.month || monthOf(x.date), acct: acctOf(x), acctSet: true }); if (x.kind === 'out') loadOut(x); }
     } else if (arg[0] === 'p' && arg.indexOf('plan-') !== 0) {
       const p = S.plans.find((q) => q.id === arg.slice(1));
-      if (p) Object.assign(F, { mode: 'plan', editId: p.id, kind: p.kind, amt: centsToInput(p.amount), cat: p.cat, payee: p.payee || '', title: p.title || '', date: p.date, repeat: p.repeat === 'monthly', acct: p.acct || 'online', acctSet: true });
+      if (p) { Object.assign(F, { mode: 'plan', editId: p.id, kind: p.kind, amt: centsToInput(p.amount), cat: p.cat, payee: p.payee || '', title: p.title || '', date: p.date || null, month: p.month || curMonth(), repeat: p.repeat === 'monthly', acct: p.acct || 'online', acctSet: true }); if (p.kind === 'out') loadOut(p); }
     } else if (arg.indexOf('plan-') === 0) {
       Object.assign(F, { mode: 'plan', kind: arg.slice(5) === 'in' ? 'in' : 'out', date: addDays(t, 7) });
     } else if (arg === 'lidl') {
@@ -541,120 +582,238 @@ VIEWS.neu = {
     if (!F.cat || !S.cats.some((c) => c.id === F.cat)) F.cat = defaultCatOf(F.kind);
   },
   html() {
-    const isPlan = F.mode === 'plan' || F.plan;
-    const editing = !!F.editId;
+    const isPlan = fIsPlan(); const editing = !!F.editId;
     const title = (editing ? '' : 'Neue ') + (isPlan ? 'geplante ' : '') + KIND_TITLES[F.kind] + (editing ? ' bearbeiten' : '');
     const cats = catsOf(F.kind);
-    const payees = Array.from(new Set(S.tx.filter((t) => t.kind === F.kind && t.payee).map((t) => t.payee).concat(F.kind === 'refund' ? S.people.map((p) => p.name) : []))).slice(0, 40);
-    const showSnacks = F.kind === 'out' && F.cat === 'c_lidl' && !isPlan;
+    const canPlan = !editing && F.mode !== 'plan' && (F.kind === 'out' || F.kind === 'in');
     return `<div class="page form-page">
       <div class="topbar-row">
         <button type="button" class="icon-btn glass" id="f-close" aria-label="Schließen">${svg('close')}</button>
         <h1 class="center">${title.charAt(0).toUpperCase() + title.slice(1)}</h1>
-        ${editing ? `<button type="button" class="icon-btn glass danger-ic" id="f-del" aria-label="Löschen">${svg('trash')}</button>` : '<span class="spacer"></span>'}
+        ${editing ? `<button type="button" class="icon-btn glass danger-ic" id="f-del" aria-label="Löschen">${svg('trash')}</button>`
+    : canPlan ? `<button type="button" class="plan-btn glass${F.plan ? ' on' : ''}" id="f-plan" aria-pressed="${F.plan}" aria-label="Erst planen">${svg('calendar')}<span>Planen</span></button>` : '<span class="spacer"></span>'}
       </div>
       ${editing ? '' : segHTML(F.mode === 'plan' ? [['out', 'Ausgabe'], ['in', 'Einnahme']] : [['out', 'Ausgabe'], ['in', 'Einnahme'], ['refund', 'Zurück'], ['transfer', 'Umbuchen']], F.kind, 'data-fk', 'aria-label="Art"')}
-      <div class="amount-wrap">
-        <div class="amount ${fSign().c}" id="f-amount" aria-live="polite">${fSign().s}${esc(F.amt || '0')}<span class="cur">€</span></div>
-        <div class="hint" id="f-hint">${formHint()}</div>
-      </div>
+      <div id="f-area">${areaHTML()}</div>
       ${F.kind === 'transfer' ? '' : `<div class="hscroll cat-pick no-swipe" role="radiogroup" aria-label="Kategorie">${cats.map((c) => `<button type="button" class="cat-chip${c.id === F.cat ? ' on' : ''}" data-fc="${c.id}" role="radio" aria-checked="${c.id === F.cat}" style="--c:${c.color}">${catIcon(c, 46)}<span>${esc(c.name)}</span></button>`).join('')}
         <button type="button" class="cat-chip add" id="f-newcat"><span class="cat-ic" style="--c:var(--sub);width:46px;height:46px">${svg('plus')}</span><span>Neu</span></button></div>`}
-      ${showSnacks ? `<button type="button" class="link snack-link" id="f-snacks">${svg('croissant')}Snacks antippen</button>` : ''}
-      <div class="fields">
-        ${segHTML(F.kind === 'transfer' ? [['online', 'Konto → Bar'], ['bar', 'Bar → Konto']] : [['online', 'Online'], ['bar', 'Bar']], F.acct, 'data-fa', 'aria-label="Online oder bar"')}
-        ${F.kind === 'transfer' ? '' : `<label class="field glass">${svg(F.kind === 'out' ? 'send' : 'people')}<span class="sr">${F.kind === 'out' ? 'An wen' : 'Von wem'}</span>
-          <input id="f-payee" list="f-payees" placeholder="${F.kind === 'out' ? 'An wen? (Empfänger)' : F.kind === 'refund' ? 'Von wem? (z. B. Lena)' : 'Von wem? (z. B. Eltern)'}" value="${esc(F.payee)}" maxlength="60" autocomplete="off"></label>
-        <datalist id="f-payees">${payees.map((p) => `<option value="${esc(p)}"></option>`).join('')}</datalist>`}
-        ${F.kind === 'refund' ? '' : `<label class="field glass">${svg('tag')}<span class="sr">Bezeichnung</span><input id="f-title" placeholder="${F.kind === 'transfer' ? 'Bezeichnung (z. B. Abgehoben)' : 'Bezeichnung (z. B. Wocheneinkauf)'}" value="${esc(F.title)}" maxlength="60" autocomplete="off"></label>`}
-        <div class="field-row">
-          ${F.kind === 'refund' ? `<div class="field glass month-field" aria-label="Zählt für Monat">
-            <button type="button" class="icon-btn sm plain" id="f-mprev" aria-label="Monat früher">${svg('back')}</button>
-            <span class="grow center-txt"><span class="small">zählt für</span><span class="b">${monthName(F.month)}</span></span>
-            <button type="button" class="icon-btn sm plain" id="f-mnext" aria-label="Monat später" ${F.month >= curMonth() ? 'disabled' : ''}>${svg('next')}</button></div>` : ''}
-          <label class="field glass date-field">${svg('calendar')}<span class="sr">${isPlan ? 'Fällig am' : 'Datum'}</span><input id="f-date" type="date" value="${F.date}" ${isPlan ? '' : `max="${todayStr()}"`}></label>
-        </div>
-        ${!editing && F.mode !== 'plan' && F.kind !== 'refund' && F.kind !== 'transfer' ? `<button type="button" class="toggle-row glass" id="f-plan" aria-pressed="${F.plan}">${svg('calendar')}<span class="grow">Erst planen<span class="small block">Noch nicht bezahlt/bekommen – kommt in „Geplant“</span></span><span class="switch"></span></button>` : ''}
-        ${isPlan ? `<button type="button" class="toggle-row glass" id="f-repeat" aria-pressed="${F.repeat}">${svg('repeat')}<span class="grow">Jeden Monat wiederholen</span><span class="switch"></span></button>` : ''}
-      </div>
+      <div class="fields" id="f-meta">${metaHTML()}</div>
     </div>
-    <div class="dock glass" id="dock">
-      ${keypadHTML()}
-      <button type="button" class="btn save" id="f-save" ${parseEur(F.amt) > 0 ? '' : 'disabled'}>${svg('check')}${isPlan ? 'Planen' : 'Speichern'}</button>
-    </div>`;
+    <div class="dock glass" id="dock">${dockHTML()}</div>`;
   },
   mount() {
-    const upd = () => {
-      const a = $('#f-amount');
-      a.innerHTML = `${fSign().s}${esc(F.amt || '0')}<span class="cur">€</span>`;
-      a.classList.remove('bump'); void a.offsetWidth; a.classList.add('bump');
-      $('#f-hint').innerHTML = formHint();
-      $('#f-save').disabled = !(parseEur(F.amt) > 0);
-    };
     $('#f-close').onclick = () => goBack();
-    $$('.key').forEach((k) => k.onclick = () => { F.amt = pressKey(F.amt, k.dataset.key); upd(); });
+    if ($('#f-del')) $('#f-del').onclick = () => deleteEntry();
+    if ($('#f-plan')) $('#f-plan').onclick = () => {
+      F.plan = !F.plan; vibrate(8);
+      if (F.plan && F.date <= todayStr()) F.date = addDays(todayStr(), 7);
+      if (!F.plan) { F.repeat = false; if (F.date > todayStr()) F.date = todayStr(); }
+      render(false);
+    };
     $$('[data-fk]').forEach((b) => b.onclick = () => {
       if (b.dataset.fk === F.kind) return;
       segMove(b);
-      const old = F.kind; F.kind = b.dataset.fk;
+      if (F.kind === 'out') commitLine();
+      const amt = fAmount(); const old = F.kind; F.kind = b.dataset.fk;
+      if (F.kind === 'out') { F.lines = []; F.backs = []; F.lmode = 'item'; F.qty = 1; F.buf = centsToInput(amt); } else F.amt = centsToInput(amt);
       if ((old === 'in') !== (F.kind === 'in')) F.cat = defaultCatOf(F.kind);
-      if (F.kind === 'refund' || F.kind === 'transfer') F.plan = false;
+      if (F.kind === 'refund' || F.kind === 'transfer') { F.plan = false; if (F.date > todayStr()) F.date = todayStr(); }
       if (!F.acctSet) F.acct = F.kind === 'refund' ? 'bar' : 'online';
+      F.open = null;
       setTimeout(() => render(false), 150);
     });
-    $$('[data-fa]').forEach((b) => b.onclick = () => { segMove(b); F.acct = b.dataset.fa; F.acctSet = true; $('#f-hint').innerHTML = formHint(); });
     $$('[data-fc]').forEach((b) => b.onclick = () => {
       F.cat = b.dataset.fc;
       $$('[data-fc]').forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-checked', x === b); });
-      $('#f-hint').innerHTML = formHint();
-      if ((F.cat === 'c_lidl') !== !!$('#f-snacks')) render(false);
+      if (fSlip()) refreshArea();
     });
     if ($('#f-newcat')) $('#f-newcat').onclick = () => catSheet(null, F.kind === 'in' ? 'in' : 'out', (id) => { F.cat = id; render(false); });
-    if ($('#f-snacks')) $('#f-snacks').onclick = () => snackPicker((cents, names) => {
-      F.amt = centsToInput(parseEur(F.amt) + cents);
-      if (!F.title) F.title = names; else F.title += ', ' + names;
-      render(false);
-    });
-    const p = $('#f-payee') || document.createElement('input');
-    p.addEventListener('input', () => { F.payee = p.value; });
-    p.addEventListener('change', () => {
-      const rule = S.rules[F.payee.trim().toLowerCase()];
-      if (rule && S.cats.some((c) => c.id === rule && c.kind === (F.kind === 'in' ? 'in' : 'out')) && rule !== F.cat) { F.cat = rule; render(false); }
-    });
-    if ($('#f-title')) $('#f-title').addEventListener('input', (e) => { F.title = e.target.value; });
-    $('#f-date').addEventListener('change', (e) => { if (e.target.value) F.date = e.target.value; });
-    if ($('#f-mprev')) {
-      $('#f-mprev').onclick = () => { F.month = addMonth(F.month, -1); render(false); };
-      $('#f-mnext').onclick = () => { if (F.month < curMonth()) { F.month = addMonth(F.month, 1); render(false); } };
-    }
-    if ($('#f-plan')) $('#f-plan').onclick = () => { F.plan = !F.plan; if (F.plan && F.date <= todayStr()) F.date = addDays(todayStr(), 7); if (!F.plan && F.date > todayStr()) F.date = todayStr(); render(false); };
-    if ($('#f-repeat')) $('#f-repeat').onclick = () => { F.repeat = !F.repeat; render(false); };
-    // Beim Tippen in Textfelder das Zahlenfeld ausblenden (die Tastatur braucht den Platz)
+    bindArea(); bindMeta(); bindDock();
     bindDockAway();
-    if ($('#f-del')) $('#f-del').onclick = () => deleteEntry();
-    $('#f-save').onclick = (e) => saveEntry(e.currentTarget);
   }
 };
-function formHint() {
-  const c = catById(F.cat); const amt = parseEur(F.amt);
-  if (F.kind === 'transfer') return F.acct === 'online' ? 'Abheben: vom Konto ins Portemonnaie – zählt nicht als Ausgabe' : 'Einzahlen: vom Portemonnaie aufs Konto – zählt nicht als Einnahme';
-  if (F.kind === 'refund') return `Wird von <b>${esc(c.name)}</b> im ${MONTHS[+F.month.slice(5) - 1]} abgezogen – zählt nicht als Einnahme`;
-  if (F.kind === 'in') return F.mode === 'plan' || F.plan ? 'Kommt in „Geplant“, bis du es bestätigst' : 'Kommt zu deinem Kontostand dazu';
-  if (F.mode === 'plan' || F.plan) return 'Kommt in „Geplant“, bis du es bestätigst';
-  if (c.budget) {
-    const r = rangeOf('m' + monthOf(F.date)); const st = stats(r.from, r.to);
-    const used = ((st.outList.find((x) => x.cat.id === c.id) || {}).net || 0) - (F.editId ? ((S.tx.find((t) => t.id === F.editId) || {}).amount || 0) : 0);
-    const rest = c.budget - used - amt;
-    return `${esc(c.name)}: ${rest < 0 ? `<span class="neg">${money(-rest)} über dem Budget</span>` : `noch ${money(rest)} im Budget`}`;
+
+/* ---------- Betrag / Kassenzettel ---------- */
+function areaHTML() {
+  if (F.kind !== 'out' || !fSlip()) {
+    const val = F.kind === 'out' ? F.buf : F.amt;
+    return `<div class="amount-wrap"><div class="amount ${fSign().c}" id="f-amount" aria-live="polite">${F.kind === 'out' && F.qty > 1 ? `<span class="qty">${F.qty} ×</span>` : ''}${fSign().s}${esc(val || '0')}<span class="cur">€</span></div></div>`;
   }
-  return `Kategorie: <b>${esc(c.name)}</b>`;
+  const live = (k) => `<div class="ln live"><span class="nm">${k === 'item' ? (F.qty > 1 ? F.qty + ' ×' : 'Posten') : 'Zurück'}</span><span class="dots"></span><span class="ln-amt${k === 'back' ? ' pos' : ''}">${k === 'back' ? '+' : ''}${esc(F.buf || '0')}<i class="caret"></i> €</span><span class="ln-x"></span></div>`;
+  const used = F.backs.map((b) => b.who);
+  const pool = personPool();
+  const t = fItems(); const net = t - fBacks();
+  return `<div class="slipwrap"><section class="slip" aria-label="Kassenzettel">
+    ${F.lines.map((l, i) => `<div class="ln"><input class="nm" data-lname="${i}" placeholder="Posten ${i + 1}" value="${esc(l.name)}" maxlength="30" autocomplete="off" aria-label="Name von Posten ${i + 1}"><span class="dots"></span><span class="ln-amt">${l.qty > 1 ? `<small>${l.qty} × ${eur(l.c)}</small>` : ''}${eur(l.qty * l.c)}</span><button type="button" class="ln-x" data-ldel="${i}" aria-label="Posten löschen">${svg('close')}</button></div>`).join('')}
+    ${F.lmode === 'item' ? live('item') : ''}
+    <div class="sum"><span>Summe</span><span class="ln-amt big">${eur(t)}</span></div>
+    ${F.backs.length || F.lmode === 'back' ? `<div class="perf">${svg('scissors')}Bekomme ich zurück</div>
+    ${F.backs.map((b, i) => `<div class="back-row"><div class="ln"><input class="nm" data-bwho="${i}" placeholder="Von wem?" value="${esc(b.who)}" maxlength="30" autocomplete="off" aria-label="Von wem"><span class="dots"></span><span class="ln-amt pos">+${eur(b.c)}</span><button type="button" class="ln-x" data-bdel="${i}" aria-label="Zeile löschen">${svg('close')}</button></div><div class="sugg">${b.who ? '' : suggHTML(nameSuggest(pool, '', used), `data-bpick="${i}" data-name`)}</div></div>`).join('')}
+    ${F.lmode === 'back' ? live('back') : ''}
+    <div class="split">${[2, 3, 4].map((n) => `<button type="button" data-split="${n}" aria-label="Gleich teilen durch ${n}">÷ ${n}</button>`).join('')}</div>
+    <div class="net"><span>Bleibt bei mir</span><span class="ln-amt big${net < 0 ? ' neg' : ''}">${eur(net)}</span></div>` : ''}
+  </section></div>`;
 }
+function refreshArea() {
+  const a = $('#f-area'); if (!a) return;
+  a.innerHTML = areaHTML(); bindArea();
+  const s = $('#f-save'); if (s) s.disabled = !(fAmount() > 0);
+}
+function bindArea() {
+  const a = $('#f-area'); if (!a) return;
+  $$('[data-lname]', a).forEach((inp) => inp.addEventListener('input', () => { F.lines[+inp.dataset.lname].name = inp.value; }));
+  $$('[data-ldel]', a).forEach((b) => b.onclick = () => { F.lines.splice(+b.dataset.ldel, 1); vibrate(8); refreshArea(); });
+  $$('[data-bdel]', a).forEach((b) => b.onclick = () => { F.backs.splice(+b.dataset.bdel, 1); if (!F.backs.length && !F.buf) F.lmode = 'item'; vibrate(8); refreshArea(); });
+  $$('[data-bwho]', a).forEach((inp) => {
+    const i = +inp.dataset.bwho; const box = inp.closest('.back-row').querySelector('.sugg');
+    const fill = () => { box.innerHTML = suggHTML(nameSuggest(personPool(), inp.value, F.backs.map((b, j) => (j === i ? '' : b.who))), `data-bpick="${i}" data-name`); bindPicks(box); };
+    inp.addEventListener('input', () => { F.backs[i].who = inp.value; fill(); });
+    inp.addEventListener('focus', fill);
+    inp.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== inp && F.backs[i] && F.backs[i].who) box.innerHTML = ''; }, 120));
+  });
+  bindPicks(a);
+  $$('[data-split]', a).forEach((b) => b.onclick = () => {
+    commitLine(); const n = +b.dataset.split; const share = Math.round(fItems() / n);
+    const keep = F.backs.slice(0, n - 1);
+    F.backs = Array.from({ length: n - 1 }, (_, i) => ({ who: keep[i] ? keep[i].who : '', c: share }));
+    F.lmode = 'item'; vibrate(10); refreshArea();
+  });
+}
+function bindPicks(root) {
+  $$('[data-bpick]', root).forEach((b) => {
+    b.onpointerdown = (e) => e.preventDefault();
+    b.onclick = () => { const i = +b.dataset.bpick; if (F.backs[i]) F.backs[i].who = b.dataset.name; const f = document.activeElement; if (f && f.blur) f.blur(); refreshArea(); };
+  });
+}
+
+/* ---------- An wen · Bezeichnung · Datum · Konto (eine Reihe, nur Symbole) ---------- */
+function fDateShort() {
+  if (!F.date) return 'offen';
+  const t = todayStr();
+  if (F.date === t) return fIsPlan() ? 'Heute' : '';
+  if (F.date === addDays(t, -1)) return 'Gestern';
+  if (F.date === addDays(t, 1)) return 'Morgen';
+  const d = parseDate(F.date);
+  return `${d.getDate()}. ${MONTHS_S[d.getMonth()]}`;
+}
+function metaHTML() {
+  const b = (id, icon, val, label, extra = '') => `<button type="button" class="ib glass${val ? ' filled' : ''}${F.open === id ? ' open' : ''}" data-mo="${id}" aria-label="${label}${val ? ': ' + esc(val) : ''}" ${extra}>${svg(icon)}${val ? `<span>${esc(val)}</span>` : ''}</button>`;
+  const btns = [];
+  if (F.kind !== 'transfer') btns.push(b('who', F.kind === 'out' ? 'send' : 'people', F.payee, F.kind === 'out' ? 'An wen' : 'Von wem'));
+  if (F.kind === 'refund') btns.push(b('month', 'clock', F.month === curMonth() ? '' : MONTHS_S[+F.month.slice(5) - 1], 'Zählt für Monat'));
+  else btns.push(b('title', 'tag', F.title, 'Bezeichnung'));
+  btns.push(b('date', F.repeat ? 'repeat' : 'calendar', fDateShort(), fIsPlan() ? 'Fällig am' : 'Datum'));
+  const acctLabel = F.kind === 'transfer' ? (F.acct === 'online' ? '→ Bar' : '→ Konto') : (F.acct === 'bar' ? 'Bar' : 'Online');
+  btns.push(`<button type="button" class="ib glass filled acct" id="f-acct" aria-label="${F.kind === 'transfer' ? (F.acct === 'online' ? 'Vom Konto ins Bargeld' : 'Vom Bargeld aufs Konto') : 'Konto: ' + acctLabel}">${svg(F.acct === 'bar' ? 'banknote' : 'bank')}<span>${acctLabel}</span></button>`);
+  let panel = '';
+  if (F.open === 'who') panel = `<div class="ipanel"><label class="field glass">${svg(F.kind === 'out' ? 'send' : 'people')}<span class="sr">${F.kind === 'out' ? 'An wen' : 'Von wem'}</span><input id="f-payee" placeholder="${F.kind === 'out' ? 'An wen?' : 'Von wem?'}" value="${esc(F.payee)}" maxlength="60" autocomplete="off"></label><div class="sugg" id="f-psugg"></div></div>`;
+  if (F.open === 'title') panel = `<div class="ipanel"><label class="field glass">${svg('tag')}<span class="sr">Bezeichnung</span><input id="f-title" placeholder="Bezeichnung" value="${esc(F.title)}" maxlength="60" autocomplete="off"></label></div>`;
+  if (F.open === 'month') panel = `<div class="ipanel"><div class="field glass month-field" aria-label="Zählt für Monat">
+      <button type="button" class="icon-btn sm plain" id="f-mprev" aria-label="Monat früher">${svg('back')}</button>
+      <span class="grow center-txt"><span class="b">${monthName(F.month)}</span></span>
+      <button type="button" class="icon-btn sm plain" id="f-mnext" aria-label="Monat später" ${F.month >= curMonth() ? 'disabled' : ''}>${svg('next')}</button></div></div>`;
+  if (F.open === 'date') {
+    const t = todayStr(); const isPlan = fIsPlan();
+    const opts = F.kind === 'refund' && isPlan ? [['none', 'Kommt noch']]
+      : isPlan ? [[addDays(t, 1), 'Morgen'], [addDays(t, 7), 'In 1 Woche'], [nextMonthDate(t), 'In 1 Monat']]
+        : [[t, 'Heute'], [addDays(t, -1), 'Gestern'], [addDays(t, -2), 'Vorgestern']];
+    panel = `<div class="ipanel"><div class="chips">${opts.map(([v, l]) => `<button type="button" class="chip${(v === 'none' ? !F.date : F.date === v) ? ' on' : ''}" data-fd="${v}">${l}</button>`).join('')}
+      <label class="chip pick-date">${svg('calendar')}Anderes<input type="date" id="f-date" value="${F.date || ''}" ${isPlan ? '' : `max="${t}"`} aria-label="Datum wählen"></label>
+      ${isPlan && F.kind !== 'refund' ? `<button type="button" class="chip${F.repeat ? ' on' : ''}" id="f-repeat" aria-pressed="${F.repeat}">${svg('repeat')}Jeden Monat</button>` : ''}</div></div>`;
+  }
+  return `<div class="irow">${btns.join('')}</div>${panel}`;
+}
+function refreshMeta(focusId) {
+  const m = $('#f-meta'); if (!m) return;
+  m.innerHTML = metaHTML(); bindMeta();
+  if (focusId) { const el = $('#' + focusId); if (el) { el.focus(); try { el.setSelectionRange(el.value.length, el.value.length); } catch (_) { /* egal */ } } }
+}
+function bindMeta() {
+  const m = $('#f-meta'); if (!m) return;
+  $$('[data-mo]', m).forEach((b) => b.onclick = () => {
+    const id = b.dataset.mo; F.open = F.open === id ? null : id; vibrate(6);
+    refreshMeta(F.open === 'who' ? 'f-payee' : F.open === 'title' ? 'f-title' : null);
+  });
+  $('#f-acct').onclick = () => { F.acct = F.acct === 'bar' ? 'online' : 'bar'; F.acctSet = true; vibrate(8); refreshMeta(); };
+  const close = () => { F.open = null; refreshMeta(); };
+  const p = $('#f-payee');
+  if (p) {
+    const box = $('#f-psugg');
+    const fill = () => {
+      box.innerHTML = suggHTML(nameSuggest(payeePool(), p.value), 'data-ppick');
+      $$('[data-ppick]', box).forEach((c) => { c.onpointerdown = (e) => e.preventDefault(); c.onclick = () => { F.payee = c.dataset.ppick; applyRule(); p.blur(); close(); }; });
+    };
+    p.addEventListener('input', () => { F.payee = p.value; fill(); });
+    p.addEventListener('blur', () => setTimeout(() => { if (F.open === 'who' && document.activeElement !== p) { applyRule(); close(); } }, 150));
+    fill();
+  }
+  const ti = $('#f-title');
+  if (ti) {
+    ti.addEventListener('input', () => { F.title = ti.value; });
+    ti.addEventListener('blur', () => setTimeout(() => { if (F.open === 'title' && document.activeElement !== ti) close(); }, 150));
+  }
+  if ($('#f-mprev')) {
+    $('#f-mprev').onclick = () => { F.month = addMonth(F.month, -1); refreshMeta(); };
+    $('#f-mnext').onclick = () => { if (F.month < curMonth()) { F.month = addMonth(F.month, 1); refreshMeta(); } };
+  }
+  $$('[data-fd]', m).forEach((b) => b.onclick = () => { F.date = b.dataset.fd === 'none' ? null : b.dataset.fd; close(); });
+  if ($('#f-date')) $('#f-date').addEventListener('change', (e) => { if (e.target.value) { F.date = e.target.value; close(); } });
+  if ($('#f-repeat')) $('#f-repeat').onclick = () => { F.repeat = !F.repeat; vibrate(8); refreshMeta(); };
+}
+/** Empfänger schon bekannt → Kategorie von damals vorschlagen */
+function applyRule() {
+  const rule = S.rules[F.payee.trim().toLowerCase()];
+  if (rule && rule !== F.cat && S.cats.some((c) => c.id === rule && c.kind === (F.kind === 'in' ? 'in' : 'out'))) {
+    F.cat = rule;
+    $$('[data-fc]').forEach((x) => { const on = x.dataset.fc === rule; x.classList.toggle('on', on); x.setAttribute('aria-checked', on); });
+  }
+}
+
+/* ---------- Zahlenfeld (einklappbar) ---------- */
+let padOpen = true;
+function dockHTML() {
+  const K = (k, label, op, sub) => `<button type="button" class="key${op ? ' op' : ''}" data-key="${k}" aria-label="${sub || label}">${label}${op && sub && k !== 'del' ? `<small>${sub}</small>` : ''}</button>`;
+  const pad = F.kind === 'out'
+    ? `<div class="keypad k4">${K('1', '1')}${K('2', '2')}${K('3', '3')}${K('del', svg('bksp'), true, 'Löschen')}${K('4', '4')}${K('5', '5')}${K('6', '6')}${K('plus', '+', true, 'Posten')}${K('7', '7')}${K('8', '8')}${K('9', '9')}${K('x', '×', true, 'Anzahl')}${K(',', ',', false, 'Komma')}${K('0', '0')}${K('C', 'C', false, 'Zeile leeren')}${K('minus', '−', true, 'Zurück')}</div>`
+    : keypadHTML();
+  return `<button type="button" class="pad-tab" id="f-pad" aria-label="${padOpen ? 'Zahlenfeld ausblenden' : 'Zahlenfeld einblenden'}" aria-expanded="${padOpen}">${svg(padOpen ? 'down' : 'keypad')}</button>
+    ${padOpen ? pad : ''}
+    <button type="button" class="btn save" id="f-save" ${fAmount() > 0 ? '' : 'disabled'}>${svg('check')}${fIsPlan() ? 'Planen' : 'Speichern'}</button>`;
+}
+function bindDock() {
+  const d = $('#dock'); if (!d) return;
+  $$('.key', d).forEach((k) => k.onclick = () => {
+    if (F.kind === 'out') {
+      slipKey(k.dataset.key); refreshArea();
+      const a = $('#f-amount'); if (a) { a.classList.remove('bump'); void a.offsetWidth; a.classList.add('bump'); }
+    } else {
+      F.amt = pressKey(F.amt, k.dataset.key);
+      const a = $('#f-amount'); if (a) { a.innerHTML = `${fSign().s}${esc(F.amt || '0')}<span class="cur">€</span>`; a.classList.remove('bump'); void a.offsetWidth; a.classList.add('bump'); }
+    }
+    $('#f-save').disabled = !(fAmount() > 0);
+  });
+  $('#f-pad').onclick = () => { padOpen = !padOpen; vibrate(6); d.innerHTML = dockHTML(); bindDock(); };
+  $('#f-save').onclick = (e) => saveEntry(e.currentTarget);
+  // Platz unten = Höhe des Docks, damit nichts darunter verschwindet
+  if (dockRO) dockRO.disconnect();
+  const setH = () => document.documentElement.style.setProperty('--dock-h', d.offsetHeight + 'px');
+  setH();
+  if (window.ResizeObserver) { dockRO = new ResizeObserver(setH); dockRO.observe(d); }
+}
+let dockRO = null;
+
 function saveEntry(btn) {
-  const amount = parseEur(F.amt);
+  if (F.kind === 'out') commitLine();
+  const amount = fAmount();
   if (amount <= 0) return;
-  const isPlan = F.mode === 'plan' || F.plan;
-  const payee = F.payee.trim(); const title = (F.title || '').trim();
-  const r = btn.getBoundingClientRect(); burst(r.left + r.width / 2, r.top + r.height / 2, F.kind === 'out' ? undefined : ['var(--pos)', '#F2C14E', '#2F6FD6']);
+  const isPlan = fIsPlan();
+  const payee = F.payee.trim(); let title = (F.title || '').trim();
+  const isOut = F.kind === 'out';
+  const named = isOut ? F.lines.map((l) => l.name.trim()).filter(Boolean) : [];
+  if (isOut && !title && named.length) title = named.join(', ');
+  const lines = isOut && (F.lines.length > 1 || (F.lines[0] && (F.lines[0].qty > 1 || F.lines[0].name.trim()))) ? F.lines.map((l) => ({ name: l.name.trim(), qty: l.qty, c: l.c })) : null;
+  const backs = isOut ? F.backs.filter((b) => b.c > 0) : [];
+  const r = btn.getBoundingClientRect(); burst(r.left + r.width / 2, r.top + r.height / 2, isOut ? undefined : ['var(--pos)', '#F2C14E', '#2F6FD6']);
   vibrate(15);
   const c = catById(F.cat);
   let msg;
@@ -662,20 +821,29 @@ function saveEntry(btn) {
   else if (F.kind === 'refund') msg = `${eur(amount)} von ${c.name} (${MONTHS[+F.month.slice(5) - 1]}) abgezogen`;
   else if (F.kind === 'transfer') msg = F.acct === 'online' ? `${eur(amount)} abgehoben` : `${eur(amount)} eingezahlt`;
   else msg = F.editId ? 'Gespeichert' : `${F.kind === 'in' ? '+' : '−'}${eur(amount)} eingetragen`;
+  if (backs.length) msg += ` · ${backs.length === 1 ? 'Rückzahlung' : backs.length + ' Rückzahlungen'} in Geplant`;
   commit(msg, () => {
     if (payee && F.kind !== 'refund' && F.kind !== 'transfer') S.rules[payee.toLowerCase()] = F.cat;
     if (isPlan) {
-      const data = { kind: F.kind === 'in' ? 'in' : 'out', amount, cat: F.cat, title, payee, date: F.date, repeat: F.repeat ? 'monthly' : 'none', acct: F.acct };
-      if (F.mode === 'plan' && F.editId) Object.assign(S.plans.find((p) => p.id === F.editId), data);
+      const data = { kind: F.kind, amount, cat: F.cat, title, payee, date: F.date, repeat: F.repeat && F.kind !== 'refund' ? 'monthly' : 'none', acct: F.acct };
+      if (F.kind === 'refund') data.month = F.month;
+      if (lines) data.lines = lines;
+      if (F.mode === 'plan' && F.editId) { const p = S.plans.find((x) => x.id === F.editId); Object.assign(p, data); if (!lines) delete p.lines; }
       else S.plans.push(Object.assign({ id: uid(), auto: false }, data));
     } else {
       const data = F.kind === 'transfer'
         ? { kind: 'transfer', amount, cat: null, title: title || (F.acct === 'online' ? 'Abgehoben' : 'Eingezahlt'), payee: '', date: F.date, acct: F.acct, to: F.acct === 'online' ? 'bar' : 'online' }
         : { kind: F.kind, amount, cat: F.cat, title: F.kind === 'refund' ? (title || 'Rückzahlung') : title, payee, date: F.date, acct: F.acct };
       if (F.kind === 'refund') data.month = F.month;
-      if (F.editId) { const t = S.tx.find((x) => x.id === F.editId); Object.assign(t, data); if (F.kind !== 'refund') delete t.month; if (F.kind !== 'transfer') delete t.to; }
-      else S.tx.push(Object.assign({ id: uid(), ts: Date.now() }, data));
+      if (lines) data.lines = lines;
+      if (F.editId) {
+        const t = S.tx.find((x) => x.id === F.editId); Object.assign(t, data);
+        if (F.kind !== 'refund') delete t.month; if (F.kind !== 'transfer') delete t.to; if (!lines) delete t.lines;
+      } else S.tx.push(Object.assign({ id: uid(), ts: Date.now() }, data));
     }
+    // „Bekomme ich zurück“ → offene Rückzahlungen in Geplant (ohne festes Datum, abhaken sobald das Geld da ist)
+    const month = monthOf(F.date || todayStr());
+    backs.forEach((b) => S.plans.push({ id: uid(), kind: 'refund', amount: b.c, cat: F.cat, title: '', payee: b.who.trim(), date: null, repeat: 'none', acct: 'bar', month, auto: false }));
   }, { after: () => { if (!isPlan) bKey = keyFor(bKey[0], F.date); goBack(); } });
 }
 function deleteEntry() {
@@ -687,44 +855,22 @@ function deleteEntry() {
     }, { after: () => goBack() });
   });
 }
-/** Zahlenfeld weg, solange getippt wird – zurück, sobald die Tastatur zugeht oder Enter gedrückt wird */
+/** Zahlenfeld weg, solange in ein Textfeld getippt wird – zurück, sobald die Tastatur zugeht oder Enter gedrückt wird */
 let vvHandler = null;
 function bindDockAway() {
-  const dock = $('#dock'); if (!dock) return;
+  const page = $('.form-page'); if (!page || !$('#dock')) return;
+  const isText = (el) => el && el.matches && el.matches('input:not([type="date"])');
   const show = () => { const d = $('#dock'); if (d) d.classList.remove('away'); };
-  $$('.fields input:not([type="date"])').forEach((inp) => {
-    inp.setAttribute('enterkeyhint', 'done');
-    inp.addEventListener('focus', () => dock.classList.add('away'));
-    inp.addEventListener('blur', () => setTimeout(() => { const a = document.activeElement; if (!a || !a.closest || !a.closest('.fields')) show(); }, 60));
-    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); inp.blur(); show(); } });
-  });
+  page.addEventListener('focusin', (e) => { if (isText(e.target)) { e.target.setAttribute('enterkeyhint', 'done'); const d = $('#dock'); if (d) d.classList.add('away'); } });
+  page.addEventListener('focusout', () => setTimeout(() => { if (!isText(document.activeElement)) show(); }, 80));
+  page.addEventListener('keydown', (e) => { if (e.key === 'Enter' && isText(e.target)) { e.preventDefault(); e.target.blur(); show(); } });
   if (window.visualViewport) {
     if (vvHandler) window.visualViewport.removeEventListener('resize', vvHandler);
     let maxH = window.visualViewport.height;
     vvHandler = () => {
       const h = window.visualViewport.height; maxH = Math.max(maxH, h);
-      if (h > maxH * 0.85) { const a = document.activeElement; if (a && a.closest && a.closest('.fields')) a.blur(); show(); }
+      if (h > maxH * 0.85) { const a = document.activeElement; if (isText(a) && a.closest('.form-page')) a.blur(); show(); }
     };
     window.visualViewport.addEventListener('resize', vvHandler);
   }
-}
-
-/** Snacks antippen → Betrag und Bezeichnung */
-function snackPicker(onDone) {
-  const cart = {};
-  const prods = S.products.slice().sort((a, b) => (b.fav ? 1 : 0) - (a.fav ? 1 : 0));
-  openSheet('<h2>Snacks antippen</h2><div id="sn-body"></div>', (el) => {
-    const draw = () => {
-      let sum = 0; const names = [];
-      prods.forEach((p) => { const q = cart[p.id] || 0; if (q) { sum += q * p.price; names.push((q > 1 ? q + '× ' : '') + p.name); } });
-      $('#sn-body', el).innerHTML = `<div class="grid3">${prods.map((p) => { const q = cart[p.id] || 0; return `<div class="tile"><button type="button" class="tile-main${q ? ' on' : ''}" data-sn="${p.id}">
-        <span class="tile-img">${p.photo ? `<img src="${p.photo}" alt="">` : svg(p.icon || 'snack')}</span><span class="tile-name">${esc(p.name)}</span><span class="tile-price">${eur(p.price)}</span></button>
-        ${q ? `<span class="qty">${q}×</span><button type="button" class="less" data-snl="${p.id}" aria-label="Eins weniger">−</button>` : ''}</div>`; }).join('')}</div>
-        <button type="button" class="btn" id="sn-ok" style="margin-top:12px" ${sum ? '' : 'disabled'}>${svg('check')}${sum ? eur(sum) + ' übernehmen' : 'Übernehmen'}</button>`;
-      $$('[data-sn]', el).forEach((b) => b.onclick = () => { cart[b.dataset.sn] = (cart[b.dataset.sn] || 0) + 1; draw(); });
-      $$('[data-snl]', el).forEach((b) => b.onclick = () => { cart[b.dataset.snl] = Math.max(0, (cart[b.dataset.snl] || 0) - 1); draw(); });
-      $('#sn-ok', el).onclick = () => { closeSheet(); onDone(sum, names.join(', ')); };
-    };
-    draw();
-  });
 }

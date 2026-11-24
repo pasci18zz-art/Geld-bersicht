@@ -98,7 +98,7 @@ async function doSyncNotifications() {
   const atDay = (ds) => { const d = parseDate(ds); d.setHours(hh || 0, mm || 0, 0, 0); return d; };
   const now = Date.now(); const list = [];
   if (S.settings.remind) {
-    S.plans.slice().sort((a, b) => a.date.localeCompare(b.date)).forEach((p) => {
+    S.plans.filter((p) => p.date).sort(planOrder).forEach((p) => {
       const at = atDay(p.date); if (at.getTime() <= now + 5000 || list.length >= 40) return;
       const isIn = p.kind === 'in'; const name = p.title || catById(p.cat).name;
       list.push({

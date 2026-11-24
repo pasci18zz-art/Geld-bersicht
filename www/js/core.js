@@ -42,6 +42,7 @@ function dateLabel(ds) {
   return `${WD[d.getDay()]}, ${d.getDate()}. ${MONTHS_S[d.getMonth()]}${ds.slice(0, 4) !== t.slice(0, 4) ? ' ' + ds.slice(0, 4) : ''}`;
 }
 function dueLabel(ds) {
+  if (!ds) return 'kommt noch';
   const n = daysBetween(todayStr(), ds);
   if (n === 0) return 'heute fällig';
   if (n === 1) return 'morgen';
@@ -79,6 +80,8 @@ const I = {
   next: '<path d="m9 18 6-6-6-6"/>',
   down: '<path d="m6 9 6 6 6-6"/>',
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+  keypad: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M7 9h.01M11 9h.01M15 9h.01M7 12h.01M11 12h.01M15 12h.01M8 15.5h8" stroke-width="2.4"/>',
+  bksp: '<path d="M9 5h11a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H9l-6-7z"/><path d="m12 9 5 5M17 9l-5 5"/>',
   close: '<path d="M6 6l12 12M18 6 6 18"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
   gear: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
@@ -448,7 +451,9 @@ function setCashAnchor(cents) {
   S.settings.cashDate = todayStr();
   S.settings.cashTs = Date.now();
 }
-const planSum = () => S.plans.reduce((s, p) => s + (p.kind === 'in' ? p.amount : -p.amount), 0);
+const planSum = () => S.plans.reduce((s, p) => s + (p.kind === 'out' ? -p.amount : p.amount), 0);
+/** Geplant sortieren: nach Datum, offene Rückzahlungen („kommt noch“, ohne Datum) ans Ende */
+const planOrder = (a, b) => (a.date || '9999').localeCompare(b.date || '9999');
 
 /* Geplante Buchungen mit „automatisch“ am Fälligkeitstag buchen */
 function applyAutoPlans() {
@@ -456,7 +461,7 @@ function applyAutoPlans() {
   let changed = false;
   S.plans.forEach((p) => {
     let guard = 0;
-    while (p.auto && p.date <= t && guard++ < 36) {
+    while (p.auto && p.date && p.date <= t && guard++ < 36) {
       S.tx.push({ id: uid(), kind: p.kind, amount: p.amount, cat: p.cat, title: p.title, payee: p.payee || '', date: p.date, ts: Date.now(), planId: p.id, acct: p.acct || 'online', planDue: p.date, planSnap: planSnap(p) });
       if (p.repeat === 'monthly') p.date = nextMonthDate(p.date); else { p.done = true; break; }
       changed = true;
@@ -483,7 +488,7 @@ function inHideWindow() {
 }
 const hiddenNow = () => !!S.settings.privacy && !revealed && (manualHide || inHideWindow());
 /** Kopie der Plan-Daten, damit ein bestätigter Plan sich wiederherstellen lässt */
-const planSnap = (p) => ({ kind: p.kind, amount: p.amount, cat: p.cat, title: p.title, payee: p.payee || '', acct: p.acct || 'online', repeat: p.repeat || 'none' });
+const planSnap = (p) => Object.assign({ kind: p.kind, amount: p.amount, cat: p.cat, title: p.title, payee: p.payee || '', acct: p.acct || 'online', repeat: p.repeat || 'none' }, p.month ? { month: p.month } : {}, p.lines ? { lines: p.lines } : {});
 function isMasked(abs, force) {
   if (!hiddenNow()) return false;
   if (force) return true;

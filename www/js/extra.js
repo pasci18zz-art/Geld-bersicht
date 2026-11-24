@@ -76,7 +76,7 @@ VIEWS.einstellungen = {
         ${S.demo ? `<button type="button" class="btn ghost" id="s-demo">${svg('sparkle')}Beispieldaten löschen</button>` : ''}
         <button type="button" class="btn danger" id="s-wipe">${svg('trash')}Alle Daten löschen</button>
       </section>
-      <p class="small center-txt">Geld · Version 3.0${window.BUILD && window.BUILD !== 'dev' ? ' · Build ' + esc(window.BUILD) : ''} · offline</p>
+      <p class="small center-txt">Geld · Version 3.1${window.BUILD && window.BUILD !== 'dev' ? ' · Build ' + esc(window.BUILD) : ''} · offline</p>
     </div>`;
   },
   mount() {
@@ -525,7 +525,7 @@ function parseBankCSV(text) {
     // Passt zu einer geplanten Buchung?
     let plan = null;
     if (!dup && !match) {
-      const p = S.plans.find((q) => !usedPlan.has(q.id) && q.amount === amount && ((type === 'out') === (q.kind === 'out')) && Math.abs(daysBetween(q.date, date)) <= 7);
+      const p = S.plans.find((q) => !usedPlan.has(q.id) && q.date && q.kind !== 'refund' && q.amount === amount && ((type === 'out') === (q.kind === 'out')) && Math.abs(daysBetween(q.date, date)) <= 7);
       if (p) { usedPlan.add(p.id); plan = p; }
     }
     const lname = name.toLowerCase();
