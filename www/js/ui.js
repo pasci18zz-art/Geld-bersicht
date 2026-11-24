@@ -85,12 +85,12 @@ function donutHTML(items, o = {}) {
     const vis = Math.max(0.6, len - gap);
     const start = acc + gap / 2;
     segs.push(`<circle class="seg-arc" cx="${c}" cy="${c}" r="${r}" fill="none" stroke="${x.cat.color}" stroke-width="${sw}" stroke-linecap="butt"
-      stroke-dasharray="0 ${C.toFixed(2)}" data-len="${vis.toFixed(2)}" data-c="${C.toFixed(2)}" style="--d:${i * 90}ms"
+      stroke-dasharray="0 ${C.toFixed(2)}" data-dcat="${x.cat.id}" data-len="${vis.toFixed(2)}" data-c="${C.toFixed(2)}" style="--d:${i * 90}ms"
       transform="rotate(${(-90 + (start / C) * 360).toFixed(2)} ${c} ${c})"/>`);
     const mid = ((acc + len / 2) / C) * 2 * Math.PI - Math.PI / 2;
     if (o.icons !== false && x.value / total >= 0.06) {
       const bx = c + r * Math.cos(mid); const by = c + r * Math.sin(mid);
-      bubbles.push(`<span class="d-bubble" style="left:${(bx / size * 100).toFixed(2)}%;top:${(by / size * 100).toFixed(2)}%;--c:${x.cat.color};--d:${300 + i * 90}ms">${x.cat.photo ? `<img src="${x.cat.photo}" alt="">` : svg(x.cat.icon)}</span>`);
+      bubbles.push(`<span class="d-bubble" data-dcat="${x.cat.id}" style="left:${(bx / size * 100).toFixed(2)}%;top:${(by / size * 100).toFixed(2)}%;--c:${x.cat.color};--d:${300 + i * 90}ms">${x.cat.photo ? `<img src="${x.cat.photo}" alt="">` : svg(x.cat.icon)}</span>`);
     }
     acc += len;
   });
@@ -398,7 +398,10 @@ function txRow(t, i = 0) {
   const c = catById(t.cat);
   const isOut = t.kind === 'out';
   const title = t.title || t.payee || c.name;
-  const sub = [t.kind === 'refund' ? (t.payee ? 'von ' + t.payee : 'zurückbekommen') : (t.payee && t.payee !== title ? t.payee : ''), c.name, acctOf(t) === 'bar' ? 'Bar' : '', dateLabel(t.date)].filter(Boolean).join(' · ');
+  const backSum = (t.backs || []).reduce((s, b) => s + b.c, 0);
+  const openBack = (t.backs || []).some((b) => S.plans.some((p) => p.id === b.planId));
+  const slip = [t.lines && t.lines.length > 1 ? t.lines.length + ' Posten' : '', backSum ? `${eur(backSum)} zurück${openBack ? ' (offen)' : ''}` : ''].filter(Boolean).join(', ');
+  const sub = [t.kind === 'refund' ? (t.payee ? 'von ' + t.payee : 'zurückbekommen') : (t.payee && t.payee !== title ? t.payee : ''), slip || c.name, acctOf(t) === 'bar' ? 'Bar' : '', dateLabel(t.date)].filter(Boolean).join(' · ');
   return `<button type="button" class="row tx-row" data-tx="${t.id}" style="--i:${i}">
     <span class="ic-wrap">${catIcon(c, 42)}${t.kind === 'refund' ? `<span class="ic-badge">${svg('refund')}</span>` : ''}</span>
     <span class="grow"><span class="r-title ell">${esc(title)}</span><span class="r-sub ell">${esc(sub)}</span></span>

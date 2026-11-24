@@ -76,7 +76,7 @@ VIEWS.einstellungen = {
         ${S.demo ? `<button type="button" class="btn ghost" id="s-demo">${svg('sparkle')}Beispieldaten löschen</button>` : ''}
         <button type="button" class="btn danger" id="s-wipe">${svg('trash')}Alle Daten löschen</button>
       </section>
-      <p class="small center-txt">Geld · Version 3.1${window.BUILD && window.BUILD !== 'dev' ? ' · Build ' + esc(window.BUILD) : ''} · offline</p>
+      <p class="small center-txt">Geld · Version 3.2${window.BUILD && window.BUILD !== 'dev' ? ' · Build ' + esc(window.BUILD) : ''} · offline</p>
     </div>`;
   },
   mount() {

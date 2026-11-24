@@ -37,9 +37,9 @@ function homeChartHTML() {
   const items = st.outList.filter((x) => x.net > 0).map((x) => ({ cat: x.cat, value: x.net }));
   return `<section class="card glass chart-card" id="chart-card">
     <div class="between"><h2 class="h2">Ausgaben</h2>${segHTML([['w', 'Woche'], ['m', 'Monat'], ['y', 'Jahr']], homePeriod, 'data-hp', 'aria-label="Zeitraum"')}</div>
-    <button type="button" class="donut-btn" id="open-details" aria-label="Alle Details ansehen">
+    <div class="donut-btn" id="open-details" role="button" tabindex="0" aria-label="Alle Details ansehen">
       ${donutHTML(items, { size: 236, label: '', valueHTML: money(st.net), sub: st.refund ? money(st.refund, { sign: '-' }) + ' zurück' : '', emptyText: 'Noch keine Ausgaben', aria: 'Ausgaben nach Kategorie' })}
-    </button>
+    </div>
     ${items.length ? `<div class="legend">${items.slice(0, 6).map((x, i) => `<button type="button" class="leg" data-cat="${x.cat.id}" style="--i:${i}">${catIcon(x.cat, 32)}<span class="leg-txt"><span class="ell">${esc(x.cat.name)}</span>${money(x.value)}</span></button>`).join('')}</div>` : ''}
     <button type="button" class="link more" id="more-details">Alles ansehen ${svg('next')}</button>
   </section>`;
@@ -57,7 +57,10 @@ function bindHomeChart() {
     }, 160);
   });
   const open = () => go('details/' + keyFor(homePeriod));
-  $('#open-details').onclick = open; $('#more-details').onclick = open;
+  // Mitte → große Übersicht, ein Stück oder Symbol → Buchungen dieser Kategorie im Zeitraum
+  $('#open-details').onclick = (e) => { const s = e.target.closest('[data-dcat]'); if (s) { vibrate(8); go('kat/' + s.getAttribute('data-dcat') + '/' + keyFor(homePeriod)); } else open(); };
+  $('#open-details').onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
+  $('#more-details').onclick = open;
   $$('.leg[data-cat]').forEach((b) => b.onclick = () => go('kat/' + b.dataset.cat + '/' + keyFor(homePeriod)));
 }
 /** Letzte Buchungen – oder die größten Ausgaben/Einnahmen im gewählten Zeitraum */
@@ -304,8 +307,9 @@ VIEWS.kat = {
     const gross = list.filter((t) => t.kind !== 'refund').reduce((s, t) => s + t.amount, 0);
     const back = list.filter((t) => t.kind === 'refund').reduce((s, t) => s + t.amount, 0);
     const budget = c.kind === 'out' && r.type === 'm' ? c.budget : 0;
+    const openBacks = S.plans.filter((p) => p.kind === 'refund' && p.cat === catId);
     return `<div class="page">
-      <div class="topbar-row"><button type="button" class="icon-btn glass" id="back" aria-label="Zurück">${svg('back')}</button><span class="spacer"></span>
+      <div class="topbar-row"><button type="button" class="icon-btn glass" id="back" aria-label="Zurück">${svg('back')}</button><span class="grow"></span>
         <button type="button" class="icon-btn glass" id="k-edit" aria-label="Kategorie bearbeiten">${svg('edit')}</button></div>
       <section class="card glass kat-hero" style="--c:${c.color}">
         ${catIcon(c, 64)}
@@ -318,6 +322,7 @@ VIEWS.kat = {
           <div><span class="small">Budget</span><span class="b">${budget ? money(budget) : '–'}</span></div></div>` : ''}
         ${budget ? `<div class="bar big"><i style="width:${clamp(Math.round((gross - back) / budget * 100), 0, 100)}%;background:${gross - back > budget ? 'var(--neg)' : c.color}"></i></div>` : ''}
       </section>
+      ${openBacks.length ? `<section class="card glass pad-s"><h2 class="h2">Kommt noch zurück</h2>${openBacks.map((p, i) => planRowHTML(p, i, true)).join('')}</section>` : ''}
       <section class="card glass pad-s">${list.length ? list.map((t, i) => txRow(t, i)).join('') : emptyHTML(c.icon, 'Hier ist noch nichts.')}</section>
     </div>`;
   },
@@ -325,6 +330,7 @@ VIEWS.kat = {
     const [catId] = arg.split('/');
     $('#back').onclick = () => goBack();
     $('#k-edit').onclick = () => catSheet(catId);
+    bindPlanRows($('#view'));
     bindTxRows($('#view'));
   }
 };
@@ -429,6 +435,7 @@ function bookPlan(p) {
   const t = { id: uid(), kind: p.kind, amount: p.amount, cat: p.cat, title: p.title || (p.kind === 'refund' ? 'Rückzahlung' : ''), payee: p.payee || '', date: todayStr(), ts: Date.now(), planId: p.id, acct: p.acct || (p.kind === 'refund' ? 'bar' : 'online'), planDue: p.date || null, planSnap: planSnap(p) };
   if (p.kind === 'refund') t.month = p.month || curMonth();
   if (p.lines) t.lines = p.lines;
+  if (p.backs) { t.backs = p.backs; S.plans.forEach((x) => { if (x.fromId === p.id) x.fromId = t.id; }); }
   S.tx.push(t);
   if (p.repeat === 'monthly') { p.date = nextMonthDate(p.date); while (p.date <= todayStr()) p.date = nextMonthDate(p.date); }
   else S.plans = S.plans.filter((x) => x.id !== p.id);
@@ -521,31 +528,60 @@ function restorePlan(txId) {
   });
 }
 /* ================= Eintragen (Ausgabe · Einnahme · Rückzahlung · Umbuchen · Geplant) ================= */
-/* Ausgabe = Kassenzettel: + neue Zeile, × Anzahl, − „Bekomme ich zurück“ (landet als offene Rückzahlung in Geplant) */
+/* Ausgabe = Kassenzettel mit Taschenrechner in jeder Zeile (+ und ×).
+   Oben: was ich bezahlt habe. Unten: was ich zurückbekomme (landet als offene Rückzahlung in Geplant). */
 let F = null;
 const KIND_TITLES = { out: 'Ausgabe', in: 'Einnahme', refund: 'Rückzahlung', transfer: 'Umbuchung' };
 const fSign = () => (F.kind === 'out' ? { s: '−', c: 'neg' } : F.kind === 'transfer' ? { s: '', c: 'zero' } : { s: '+', c: 'pos' });
 const fIsPlan = () => F.mode === 'plan' || F.plan;
-const fItems = () => F.lines.reduce((s, l) => s + l.qty * l.c, 0) + (F.lmode === 'item' ? F.qty * parseEur(F.buf) : 0);
-const fBacks = () => F.backs.reduce((s, b) => s + b.c, 0) + (F.lmode === 'back' ? parseEur(F.buf) : 0);
+const fItems = () => F.lines.reduce((s, l) => s + calcExpr(l.expr), 0);
+const fBacks = () => F.backs.reduce((s, b) => s + (b.got ? b.c : calcExpr(b.expr)), 0);
 const fAmount = () => (F.kind === 'out' ? fItems() : parseEur(F.amt));
-const fSlip = () => F.kind === 'out' && (F.lines.length > 0 || F.backs.length > 0 || F.lmode === 'back');
-function commitLine() {
-  const c = parseEur(F.buf);
-  if (c > 0) { if (F.lmode === 'item') F.lines.push({ name: '', qty: F.qty, c }); else F.backs.push({ who: '', c }); }
-  F.buf = ''; F.qty = 1;
+const fLine = () => (F.act.sec === 'back' ? F.backs : F.lines)[F.act.i];
+const exprShow = (e) => esc(e).replace(/×/g, ' × ').replace(/\+/g, ' + ');
+const hasOp = (e) => /[+×]/.test(e || '');
+/** Kassenzettel aus einer gespeicherten Buchung/Planung laden */
+function loadSlip(x) {
+  F.lines = x.lines && x.lines.length
+    ? x.lines.map((l) => ({ name: l.name || '', expr: l.expr || (l.qty > 1 ? `${l.qty}×${centsToInput(l.c)}` : centsToInput(l.c)) }))
+    : [{ name: '', expr: centsToInput(x.amount) }];
+  F.backs = (x.backs || []).map((b) => {
+    const open = b.planId && S.plans.some((p) => p.id === b.planId);
+    const got = !open && b.planId && S.tx.some((t) => t.planId === b.planId);
+    return open || got ? { who: b.who || '', expr: b.expr || centsToInput(b.c), c: b.c, planId: b.planId, got: !!got } : null;
+  }).filter(Boolean);
+  F.act = { sec: 'item', i: F.lines.length - 1 };
 }
 function slipKey(k) {
-  if (/^\d$/.test(k) || k === ',') F.buf = pressKey(F.buf, k);
+  const L = fLine(); if (!L || L.got) return;
+  const e = L.expr; const last = e.slice(-1); const cur = e.split(/[+×]/).pop();
+  if (/^\d$/.test(k)) { const n = (cur === '0' ? '' : cur) + k; const [i, d] = n.split(','); if (i.length > 6 || (d && d.length > 2)) return; L.expr = (cur === '0' ? e.slice(0, -1) : e) + k; }
+  else if (k === ',') { if (cur.includes(',')) return; L.expr = e + (cur === '' ? '0,' : ','); }
+  else if (k === '+' || k === 'x') { const op = k === 'x' ? '×' : '+'; if (!e) return; L.expr = /[+×]$/.test(e) ? e.slice(0, -1) + op : e + op; }
   else if (k === 'del') {
-    if (F.buf) F.buf = F.buf.slice(0, -1);
-    else if (F.qty > 1) F.qty = 1;
-    else if (F.lmode === 'back') { if (F.backs.length) F.backs.pop(); else F.lmode = 'item'; }
-    else if (F.lines.length) { const l = F.lines.pop(); F.buf = centsToInput(l.c); F.qty = l.qty; }
-  } else if (k === 'C') { F.buf = ''; F.qty = 1; }
-  else if (k === 'x') { const n = parseInt(F.buf, 10); if (F.lmode === 'item' && F.buf && !F.buf.includes(',') && n >= 2 && n <= 99) { F.qty = n; F.buf = ''; } }
-  else if (k === 'plus') { commitLine(); F.lmode = 'item'; }
-  else if (k === 'minus') { commitLine(); F.lmode = 'back'; }
+    if (e) { L.expr = e.slice(0, -1); return; }
+    const list = F.act.sec === 'back' ? F.backs : F.lines;
+    if (F.act.sec === 'item' && F.lines.length <= 1) return;
+    list.splice(F.act.i, 1);
+    if (F.act.sec === 'back' && !F.backs.some((b) => !b.got)) F.act = { sec: 'item', i: F.lines.length - 1 };
+    else F.act.i = Math.max(0, F.act.i - 1);
+    if (F.act.sec === 'back' && F.backs[F.act.i] && F.backs[F.act.i].got) F.act = { sec: 'item', i: F.lines.length - 1 };
+  } else if (k === 'line') {
+    if (!calcExpr(e)) return;
+    const list = F.act.sec === 'back' ? F.backs : F.lines;
+    list.splice(F.act.i + 1, 0, F.act.sec === 'back' ? { who: '', expr: '' } : { name: '', expr: '' });
+    F.act.i++;
+  } else if (k === 'back') {
+    if (F.act.sec === 'back') { F.act = { sec: 'item', i: F.lines.length - 1 }; return; }
+    let i = F.backs.findIndex((b) => !b.got && !b.expr);
+    if (i < 0) { F.backs.push({ who: '', expr: '' }); i = F.backs.length - 1; }
+    F.act = { sec: 'back', i };
+  }
+}
+/** Leere Zeilen weg (außer der ersten), bevor gespeichert oder umgeschaltet wird */
+function tidySlip() {
+  F.lines = F.lines.filter((l, i) => i === 0 || calcExpr(l.expr) > 0 || l.name.trim());
+  F.backs = F.backs.filter((b) => b.got || calcExpr(b.expr) > 0);
 }
 /** Namen vorschlagen: zuletzt benutzte zuerst, passend zu den getippten Buchstaben, höchstens 4 */
 function nameSuggest(pool, val, exclude = []) {
@@ -556,7 +592,7 @@ function nameSuggest(pool, val, exclude = []) {
 }
 const recentTx = () => S.tx.slice().sort((a, b) => b.date.localeCompare(a.date) || (b.ts || 0) - (a.ts || 0));
 const personPool = () => recentTx().filter((t) => t.kind === 'refund').map((t) => t.payee)
-  .concat(S.plans.filter((p) => p.kind === 'refund').map((p) => p.payee), S.people.map((p) => p.name));
+  .concat(recentTx().flatMap((t) => (t.backs || []).map((b) => b.who)), S.plans.filter((p) => p.kind === 'refund').map((p) => p.payee), S.people.map((p) => p.name));
 const payeePool = () => (F.kind === 'refund' ? personPool() : recentTx().filter((t) => t.kind === F.kind).map((t) => t.payee));
 const suggHTML = (list, attr) => list.map((n) => `<button type="button" class="sg" ${attr}="${esc(n)}">${esc(n)}</button>`).join('');
 
@@ -565,14 +601,13 @@ VIEWS.neu = {
   init(arg) {
     const t = todayStr();
     F = { mode: 'tx', editId: null, kind: 'out', amt: '', cat: null, payee: '', title: '', date: t, month: curMonth(), plan: false, repeat: false, acct: 'online', acctSet: false,
-      open: null, lines: [], backs: [], lmode: 'item', buf: '', qty: 1 };
-    const loadOut = (x) => { if (x.lines && x.lines.length) F.lines = x.lines.map((l) => Object.assign({}, l)); else F.buf = centsToInput(x.amount); };
+      open: null, lines: [{ name: '', expr: '' }], backs: [], act: { sec: 'item', i: 0 } };
     if (arg[0] === 'e') {
       const x = S.tx.find((q) => q.id === arg.slice(1));
-      if (x) { Object.assign(F, { editId: x.id, kind: x.kind, amt: centsToInput(x.amount), cat: x.cat, payee: x.payee || '', title: x.title || '', date: x.date, month: x.month || monthOf(x.date), acct: acctOf(x), acctSet: true }); if (x.kind === 'out') loadOut(x); }
+      if (x) { Object.assign(F, { editId: x.id, kind: x.kind, amt: centsToInput(x.amount), cat: x.cat, payee: x.payee || '', title: x.title || '', date: x.date, month: x.month || monthOf(x.date), acct: acctOf(x), acctSet: true }); if (x.kind === 'out') loadSlip(x); }
     } else if (arg[0] === 'p' && arg.indexOf('plan-') !== 0) {
       const p = S.plans.find((q) => q.id === arg.slice(1));
-      if (p) { Object.assign(F, { mode: 'plan', editId: p.id, kind: p.kind, amt: centsToInput(p.amount), cat: p.cat, payee: p.payee || '', title: p.title || '', date: p.date || null, month: p.month || curMonth(), repeat: p.repeat === 'monthly', acct: p.acct || 'online', acctSet: true }); if (p.kind === 'out') loadOut(p); }
+      if (p) { Object.assign(F, { mode: 'plan', editId: p.id, kind: p.kind, amt: centsToInput(p.amount), cat: p.cat, payee: p.payee || '', title: p.title || '', date: p.date || null, month: p.month || curMonth(), repeat: p.repeat === 'monthly', acct: p.acct || 'online', acctSet: true }); if (p.kind === 'out') loadSlip(p); }
     } else if (arg.indexOf('plan-') === 0) {
       Object.assign(F, { mode: 'plan', kind: arg.slice(5) === 'in' ? 'in' : 'out', date: addDays(t, 7) });
     } else if (arg === 'lidl') {
@@ -613,9 +648,8 @@ VIEWS.neu = {
     $$('[data-fk]').forEach((b) => b.onclick = () => {
       if (b.dataset.fk === F.kind) return;
       segMove(b);
-      if (F.kind === 'out') commitLine();
       const amt = fAmount(); const old = F.kind; F.kind = b.dataset.fk;
-      if (F.kind === 'out') { F.lines = []; F.backs = []; F.lmode = 'item'; F.qty = 1; F.buf = centsToInput(amt); } else F.amt = centsToInput(amt);
+      if (F.kind === 'out') { F.lines = [{ name: '', expr: centsToInput(amt) }]; F.backs = []; F.act = { sec: 'item', i: 0 }; } else F.amt = centsToInput(amt);
       if ((old === 'in') !== (F.kind === 'in')) F.cat = defaultCatOf(F.kind);
       if (F.kind === 'refund' || F.kind === 'transfer') { F.plan = false; if (F.date > todayStr()) F.date = todayStr(); }
       if (!F.acctSet) F.acct = F.kind === 'refund' ? 'bar' : 'online';
@@ -625,7 +659,6 @@ VIEWS.neu = {
     $$('[data-fc]').forEach((b) => b.onclick = () => {
       F.cat = b.dataset.fc;
       $$('[data-fc]').forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-checked', x === b); });
-      if (fSlip()) refreshArea();
     });
     if ($('#f-newcat')) $('#f-newcat').onclick = () => catSheet(null, F.kind === 'in' ? 'in' : 'out', (id) => { F.cat = id; render(false); });
     bindArea(); bindMeta(); bindDock();
@@ -635,22 +668,29 @@ VIEWS.neu = {
 
 /* ---------- Betrag / Kassenzettel ---------- */
 function areaHTML() {
-  if (F.kind !== 'out' || !fSlip()) {
-    const val = F.kind === 'out' ? F.buf : F.amt;
-    return `<div class="amount-wrap"><div class="amount ${fSign().c}" id="f-amount" aria-live="polite">${F.kind === 'out' && F.qty > 1 ? `<span class="qty">${F.qty} ×</span>` : ''}${fSign().s}${esc(val || '0')}<span class="cur">€</span></div></div>`;
+  if (F.kind !== 'out') {
+    return `<div class="amount-wrap"><div class="amount ${fSign().c}" id="f-amount" aria-live="polite">${fSign().s}${esc(F.amt || '0')}<span class="cur">€</span></div></div>`;
   }
-  const live = (k) => `<div class="ln live"><span class="nm">${k === 'item' ? (F.qty > 1 ? F.qty + ' ×' : 'Posten') : 'Zurück'}</span><span class="dots"></span><span class="ln-amt${k === 'back' ? ' pos' : ''}">${k === 'back' ? '+' : ''}${esc(F.buf || '0')}<i class="caret"></i> €</span><span class="ln-x"></span></div>`;
-  const used = F.backs.map((b) => b.who);
-  const pool = personPool();
+  const isAct = (sec, i) => F.act.sec === sec && F.act.i === i;
+  const amtHTML = (expr, sec, i, sign) => {
+    const act = isAct(sec, i); const v = calcExpr(expr); const caret = act ? '<i class="caret"></i>' : '';
+    const open = `<button type="button" class="ln-amt${sign === '+' ? ' pos' : ''}" data-act="${sec}:${i}" aria-label="Betrag bearbeiten">`;
+    if (hasOp(expr)) return `${open}<small>${exprShow(expr)}${caret} =</small>${sign}${eur(v)}</button>`;
+    if (act) return `${open}${sign}${expr ? esc(expr) : '0'}${caret} €</button>`;
+    return `${open}${sign}${eur(v)}</button>`;
+  };
+  const single = F.lines.length === 1 && !F.backs.length && F.act.sec === 'item';
+  const pool = personPool(); const used = F.backs.map((b) => b.who);
   const t = fItems(); const net = t - fBacks();
-  return `<div class="slipwrap"><section class="slip" aria-label="Kassenzettel">
-    ${F.lines.map((l, i) => `<div class="ln"><input class="nm" data-lname="${i}" placeholder="Posten ${i + 1}" value="${esc(l.name)}" maxlength="30" autocomplete="off" aria-label="Name von Posten ${i + 1}"><span class="dots"></span><span class="ln-amt">${l.qty > 1 ? `<small>${l.qty} × ${eur(l.c)}</small>` : ''}${eur(l.qty * l.c)}</span><button type="button" class="ln-x" data-ldel="${i}" aria-label="Posten löschen">${svg('close')}</button></div>`).join('')}
-    ${F.lmode === 'item' ? live('item') : ''}
+  const backRows = F.backs.map((b, i) => b.got
+    ? `<div class="back-row"><div class="ln got"><span class="nm">${esc(b.who || 'Rückzahlung')}</span><span class="dots"></span><span class="ln-amt pos">+${eur(b.c)}</span><span class="ln-x" title="Erhalten">${svg('check')}</span></div></div>`
+    : `<div class="back-row"><div class="ln${isAct('back', i) ? ' live' : ''}"><input class="nm" data-bwho="${i}" placeholder="Von wem?" value="${esc(b.who)}" maxlength="30" autocomplete="off" aria-label="Von wem"><span class="dots"></span>${amtHTML(b.expr, 'back', i, '+')}<button type="button" class="ln-x" data-bdel="${i}" aria-label="Zeile löschen">${svg('close')}</button></div><div class="sugg">${b.who ? '' : suggHTML(nameSuggest(pool, '', used), `data-bpick="${i}" data-name`)}</div></div>`).join('');
+  return `<div class="slipwrap"><section class="slip${single ? ' single' : ''}" aria-label="Kassenzettel">
+    ${F.lines.map((l, i) => `<div class="ln item${isAct('item', i) ? ' live' : ''}"><input class="nm" data-lname="${i}" placeholder="${single ? 'Was?' : 'Posten ' + (i + 1)}" value="${esc(l.name)}" maxlength="30" autocomplete="off" aria-label="Name von Posten ${i + 1}"><span class="dots"></span>${amtHTML(l.expr, 'item', i, '')}${F.lines.length > 1 ? `<button type="button" class="ln-x" data-ldel="${i}" aria-label="Posten löschen">${svg('close')}</button>` : '<span class="ln-x"></span>'}</div>`).join('')}
     <div class="sum"><span>Summe</span><span class="ln-amt big">${eur(t)}</span></div>
-    ${F.backs.length || F.lmode === 'back' ? `<div class="perf">${svg('scissors')}Bekomme ich zurück</div>
-    ${F.backs.map((b, i) => `<div class="back-row"><div class="ln"><input class="nm" data-bwho="${i}" placeholder="Von wem?" value="${esc(b.who)}" maxlength="30" autocomplete="off" aria-label="Von wem"><span class="dots"></span><span class="ln-amt pos">+${eur(b.c)}</span><button type="button" class="ln-x" data-bdel="${i}" aria-label="Zeile löschen">${svg('close')}</button></div><div class="sugg">${b.who ? '' : suggHTML(nameSuggest(pool, '', used), `data-bpick="${i}" data-name`)}</div></div>`).join('')}
-    ${F.lmode === 'back' ? live('back') : ''}
-    <div class="split">${[2, 3, 4].map((n) => `<button type="button" data-split="${n}" aria-label="Gleich teilen durch ${n}">÷ ${n}</button>`).join('')}</div>
+    <button type="button" class="perf" data-key="back" aria-label="Bekomme ich zurück">${svg('scissors')}Bekomme ich zurück${F.backs.length ? '' : `<span class="perf-add">${svg('plus')}</span>`}</button>
+    ${backRows}
+    ${F.backs.length ? `<div class="split">${[2, 3, 4].map((n) => `<button type="button" data-split="${n}" aria-label="Gleich teilen durch ${n}">÷ ${n}</button>`).join('')}</div>
     <div class="net"><span>Bleibt bei mir</span><span class="ln-amt big${net < 0 ? ' neg' : ''}">${eur(net)}</span></div>` : ''}
   </section></div>`;
 }
@@ -658,12 +698,16 @@ function refreshArea() {
   const a = $('#f-area'); if (!a) return;
   a.innerHTML = areaHTML(); bindArea();
   const s = $('#f-save'); if (s) s.disabled = !(fAmount() > 0);
+  const bk = $('#dock [data-key="back"]');
+  if (bk) { bk.outerHTML = backKeyHTML(); bindDockKeys(); }
 }
 function bindArea() {
   const a = $('#f-area'); if (!a) return;
   $$('[data-lname]', a).forEach((inp) => inp.addEventListener('input', () => { F.lines[+inp.dataset.lname].name = inp.value; }));
-  $$('[data-ldel]', a).forEach((b) => b.onclick = () => { F.lines.splice(+b.dataset.ldel, 1); vibrate(8); refreshArea(); });
-  $$('[data-bdel]', a).forEach((b) => b.onclick = () => { F.backs.splice(+b.dataset.bdel, 1); if (!F.backs.length && !F.buf) F.lmode = 'item'; vibrate(8); refreshArea(); });
+  $$('[data-act]', a).forEach((b) => b.onclick = () => { const [sec, i] = b.dataset.act.split(':'); F.act = { sec, i: +i }; vibrate(6); refreshArea(); });
+  $$('[data-ldel]', a).forEach((b) => b.onclick = () => { const i = +b.dataset.ldel; F.lines.splice(i, 1); F.act = { sec: 'item', i: Math.min(F.act.sec === 'item' ? F.act.i : 0, F.lines.length - 1) }; vibrate(8); refreshArea(); });
+  $$('[data-bdel]', a).forEach((b) => b.onclick = () => { F.backs.splice(+b.dataset.bdel, 1); if (F.act.sec === 'back') F.act = { sec: 'item', i: F.lines.length - 1 }; vibrate(8); refreshArea(); });
+  $$('.perf[data-key]', a).forEach((b) => b.onclick = () => { slipKey('back'); vibrate(6); refreshArea(); });
   $$('[data-bwho]', a).forEach((inp) => {
     const i = +inp.dataset.bwho; const box = inp.closest('.back-row').querySelector('.sugg');
     const fill = () => { box.innerHTML = suggHTML(nameSuggest(personPool(), inp.value, F.backs.map((b, j) => (j === i ? '' : b.who))), `data-bpick="${i}" data-name`); bindPicks(box); };
@@ -673,10 +717,11 @@ function bindArea() {
   });
   bindPicks(a);
   $$('[data-split]', a).forEach((b) => b.onclick = () => {
-    commitLine(); const n = +b.dataset.split; const share = Math.round(fItems() / n);
-    const keep = F.backs.slice(0, n - 1);
-    F.backs = Array.from({ length: n - 1 }, (_, i) => ({ who: keep[i] ? keep[i].who : '', c: share }));
-    F.lmode = 'item'; vibrate(10); refreshArea();
+    const n = +b.dataset.split; const share = Math.round(fItems() / n);
+    const got = F.backs.filter((x) => x.got); const open = F.backs.filter((x) => !x.got);
+    const want = Math.max(0, n - 1 - got.length);
+    F.backs = got.concat(Array.from({ length: want }, (_, i) => ({ who: open[i] ? open[i].who : '', expr: centsToInput(share), planId: open[i] && open[i].planId })));
+    F.act = { sec: 'item', i: F.lines.length - 1 }; vibrate(10); refreshArea();
   });
 }
 function bindPicks(root) {
@@ -771,27 +816,31 @@ function applyRule() {
 
 /* ---------- Zahlenfeld (einklappbar) ---------- */
 let padOpen = true;
+const padKey = (k, label, op, sub) => `<button type="button" class="key${op ? ' op' : ''}" data-key="${k}" aria-label="${sub || label}">${label}${op && sub && k !== 'del' ? `<small>${sub}</small>` : ''}</button>`;
+const backKeyHTML = () => (F.act.sec === 'back' ? padKey('back', svg('cart'), true, 'Bezahlt') : padKey('back', svg('refund'), true, 'Zurück'));
 function dockHTML() {
-  const K = (k, label, op, sub) => `<button type="button" class="key${op ? ' op' : ''}" data-key="${k}" aria-label="${sub || label}">${label}${op && sub && k !== 'del' ? `<small>${sub}</small>` : ''}</button>`;
+  const K = padKey;
   const pad = F.kind === 'out'
-    ? `<div class="keypad k4">${K('1', '1')}${K('2', '2')}${K('3', '3')}${K('del', svg('bksp'), true, 'Löschen')}${K('4', '4')}${K('5', '5')}${K('6', '6')}${K('plus', '+', true, 'Posten')}${K('7', '7')}${K('8', '8')}${K('9', '9')}${K('x', '×', true, 'Anzahl')}${K(',', ',', false, 'Komma')}${K('0', '0')}${K('C', 'C', false, 'Zeile leeren')}${K('minus', '−', true, 'Zurück')}</div>`
+    ? `<div class="keypad k4">${K('1', '1')}${K('2', '2')}${K('3', '3')}${K('del', svg('bksp'), true, 'Löschen')}${K('4', '4')}${K('5', '5')}${K('6', '6')}${K('x', '×', true, 'Mal')}${K('7', '7')}${K('8', '8')}${K('9', '9')}${K('+', '+', true, 'Plus')}${K(',', ',', false, 'Komma')}${K('0', '0')}${K('line', svg('enter'), true, 'Zeile')}${backKeyHTML()}</div>`
     : keypadHTML();
   return `<button type="button" class="pad-tab" id="f-pad" aria-label="${padOpen ? 'Zahlenfeld ausblenden' : 'Zahlenfeld einblenden'}" aria-expanded="${padOpen}">${svg(padOpen ? 'down' : 'keypad')}</button>
     ${padOpen ? pad : ''}
     <button type="button" class="btn save" id="f-save" ${fAmount() > 0 ? '' : 'disabled'}>${svg('check')}${fIsPlan() ? 'Planen' : 'Speichern'}</button>`;
 }
-function bindDock() {
+function bindDockKeys() {
   const d = $('#dock'); if (!d) return;
   $$('.key', d).forEach((k) => k.onclick = () => {
-    if (F.kind === 'out') {
-      slipKey(k.dataset.key); refreshArea();
-      const a = $('#f-amount'); if (a) { a.classList.remove('bump'); void a.offsetWidth; a.classList.add('bump'); }
-    } else {
+    if (F.kind === 'out') { slipKey(k.dataset.key); refreshArea(); }
+    else {
       F.amt = pressKey(F.amt, k.dataset.key);
       const a = $('#f-amount'); if (a) { a.innerHTML = `${fSign().s}${esc(F.amt || '0')}<span class="cur">€</span>`; a.classList.remove('bump'); void a.offsetWidth; a.classList.add('bump'); }
     }
     $('#f-save').disabled = !(fAmount() > 0);
   });
+}
+function bindDock() {
+  const d = $('#dock'); if (!d) return;
+  bindDockKeys();
   $('#f-pad').onclick = () => { padOpen = !padOpen; vibrate(6); d.innerHTML = dockHTML(); bindDock(); };
   $('#f-save').onclick = (e) => saveEntry(e.currentTarget);
   // Platz unten = Höhe des Docks, damit nichts darunter verschwindet
@@ -803,7 +852,7 @@ function bindDock() {
 let dockRO = null;
 
 function saveEntry(btn) {
-  if (F.kind === 'out') commitLine();
+  if (F.kind === 'out') tidySlip();
   const amount = fAmount();
   if (amount <= 0) return;
   const isPlan = fIsPlan();
@@ -811,25 +860,26 @@ function saveEntry(btn) {
   const isOut = F.kind === 'out';
   const named = isOut ? F.lines.map((l) => l.name.trim()).filter(Boolean) : [];
   if (isOut && !title && named.length) title = named.join(', ');
-  const lines = isOut && (F.lines.length > 1 || (F.lines[0] && (F.lines[0].qty > 1 || F.lines[0].name.trim()))) ? F.lines.map((l) => ({ name: l.name.trim(), qty: l.qty, c: l.c })) : null;
-  const backs = isOut ? F.backs.filter((b) => b.c > 0) : [];
+  const lines = isOut && (F.lines.length > 1 || hasOp(F.lines[0].expr) || F.lines[0].name.trim()) ? F.lines.filter((l) => calcExpr(l.expr) > 0).map((l) => ({ name: l.name.trim(), expr: l.expr.replace(/[+×]$/, ''), c: calcExpr(l.expr) })) : null;
   const r = btn.getBoundingClientRect(); burst(r.left + r.width / 2, r.top + r.height / 2, isOut ? undefined : ['var(--pos)', '#F2C14E', '#2F6FD6']);
   vibrate(15);
   const c = catById(F.cat);
+  const newBacks = isOut ? F.backs.filter((b) => !b.got && !b.planId && calcExpr(b.expr) > 0).length : 0;
   let msg;
   if (isPlan) msg = F.editId ? 'Geplante Buchung gespeichert' : `Geplant: ${title || c.name}`;
   else if (F.kind === 'refund') msg = `${eur(amount)} von ${c.name} (${MONTHS[+F.month.slice(5) - 1]}) abgezogen`;
   else if (F.kind === 'transfer') msg = F.acct === 'online' ? `${eur(amount)} abgehoben` : `${eur(amount)} eingezahlt`;
   else msg = F.editId ? 'Gespeichert' : `${F.kind === 'in' ? '+' : '−'}${eur(amount)} eingetragen`;
-  if (backs.length) msg += ` · ${backs.length === 1 ? 'Rückzahlung' : backs.length + ' Rückzahlungen'} in Geplant`;
+  if (newBacks) msg += ` · ${newBacks === 1 ? 'Rückzahlung' : newBacks + ' Rückzahlungen'} in Geplant`;
   commit(msg, () => {
     if (payee && F.kind !== 'refund' && F.kind !== 'transfer') S.rules[payee.toLowerCase()] = F.cat;
+    let owner;
     if (isPlan) {
       const data = { kind: F.kind, amount, cat: F.cat, title, payee, date: F.date, repeat: F.repeat && F.kind !== 'refund' ? 'monthly' : 'none', acct: F.acct };
       if (F.kind === 'refund') data.month = F.month;
       if (lines) data.lines = lines;
-      if (F.mode === 'plan' && F.editId) { const p = S.plans.find((x) => x.id === F.editId); Object.assign(p, data); if (!lines) delete p.lines; }
-      else S.plans.push(Object.assign({ id: uid(), auto: false }, data));
+      if (F.mode === 'plan' && F.editId) { owner = S.plans.find((x) => x.id === F.editId); Object.assign(owner, data); if (!lines) delete owner.lines; }
+      else { owner = Object.assign({ id: uid(), auto: false }, data); S.plans.push(owner); }
     } else {
       const data = F.kind === 'transfer'
         ? { kind: 'transfer', amount, cat: null, title: title || (F.acct === 'online' ? 'Abgehoben' : 'Eingezahlt'), payee: '', date: F.date, acct: F.acct, to: F.acct === 'online' ? 'bar' : 'online' }
@@ -837,21 +887,38 @@ function saveEntry(btn) {
       if (F.kind === 'refund') data.month = F.month;
       if (lines) data.lines = lines;
       if (F.editId) {
-        const t = S.tx.find((x) => x.id === F.editId); Object.assign(t, data);
-        if (F.kind !== 'refund') delete t.month; if (F.kind !== 'transfer') delete t.to; if (!lines) delete t.lines;
-      } else S.tx.push(Object.assign({ id: uid(), ts: Date.now() }, data));
+        owner = S.tx.find((x) => x.id === F.editId); Object.assign(owner, data);
+        if (F.kind !== 'refund') delete owner.month; if (F.kind !== 'transfer') delete owner.to; if (!lines) delete owner.lines;
+      } else { owner = Object.assign({ id: uid(), ts: Date.now() }, data); S.tx.push(owner); }
     }
-    // „Bekomme ich zurück“ → offene Rückzahlungen in Geplant (ohne festes Datum, abhaken sobald das Geld da ist)
-    const month = monthOf(F.date || todayStr());
-    backs.forEach((b) => S.plans.push({ id: uid(), kind: 'refund', amount: b.c, cat: F.cat, title: '', payee: b.who.trim(), date: null, repeat: 'none', acct: 'bar', month, auto: false }));
+    if (isOut) syncBacks(owner, F.backs, F.cat, monthOf(F.date || todayStr()));
+    else if (owner.backs) { syncBacks(owner, [], F.cat, curMonth()); }
   }, { after: () => { if (!isPlan) bKey = keyFor(bKey[0], F.date); goBack(); } });
+}
+/** „Bekomme ich zurück“ ↔ offene Rückzahlungen in Geplant abgleichen (ohne festes Datum, abhaken sobald das Geld da ist) */
+function syncBacks(owner, backs, cat, month) {
+  const prev = owner.backs || []; const out = [];
+  backs.forEach((b) => {
+    if (b.got) { out.push({ who: b.who, expr: b.expr, c: b.c, planId: b.planId }); return; }
+    const c = calcExpr(b.expr); if (c <= 0) return;
+    let p = b.planId && S.plans.find((x) => x.id === b.planId);
+    if (p) Object.assign(p, { amount: c, payee: b.who.trim(), cat, month });
+    else { p = { id: uid(), kind: 'refund', amount: c, cat, title: '', payee: b.who.trim(), date: null, repeat: 'none', acct: 'bar', month, auto: false }; S.plans.push(p); }
+    p.fromId = owner.id;
+    out.push({ who: b.who.trim(), expr: b.expr.replace(/[+×]$/, ''), c, planId: p.id });
+  });
+  prev.forEach((pb) => { if (pb.planId && !out.some((o) => o.planId === pb.planId)) S.plans = S.plans.filter((x) => x.id !== pb.planId); });
+  if (out.length) owner.backs = out; else delete owner.backs;
 }
 function deleteEntry() {
   const isPlan = F.mode === 'plan';
   confirmSheet(isPlan ? 'Geplante Buchung löschen?' : 'Buchung löschen?', 'Das kannst du danach noch rückgängig machen.', 'Löschen', () => {
     commit('Gelöscht', () => {
+      const owner = isPlan ? S.plans.find((p) => p.id === F.editId) : S.tx.find((t) => t.id === F.editId);
+      const open = ((owner && owner.backs) || []).map((b) => b.planId).filter(Boolean);
       if (isPlan) S.plans = S.plans.filter((p) => p.id !== F.editId);
       else S.tx = S.tx.filter((t) => t.id !== F.editId);
+      if (open.length) S.plans = S.plans.filter((p) => !open.includes(p.id));
     }, { after: () => goBack() });
   });
 }

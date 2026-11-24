@@ -65,6 +65,12 @@ function parseEur(s) {
   const n = parseFloat(s);
   return isNaN(n) ? 0 : Math.round(n * 100);
 }
+/** Rechenzeile wie „3×1,79+2,49“ → Cent (Punkt vor Strich) */
+function calcExpr(e) {
+  e = String(e || '').replace(/[+×]$/, ''); if (!e) return 0;
+  const sum = e.split('+').reduce((s, term) => s + term.split('×').reduce((a, x) => a * (parseFloat(x.replace(',', '.')) || 0), 1), 0);
+  return Math.round(sum * 100);
+}
 const centsToInput = (c) => (c ? (c / 100).toFixed(2).replace('.', ',').replace(/,00$/, '') : '');
 
 /* ---------- Symbole (eigene Strichzeichnungen, 24er Raster) ---------- */
@@ -82,6 +88,7 @@ const I = {
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
   keypad: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M7 9h.01M11 9h.01M15 9h.01M7 12h.01M11 12h.01M15 12h.01M8 15.5h8" stroke-width="2.4"/>',
   bksp: '<path d="M9 5h11a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H9l-6-7z"/><path d="m12 9 5 5M17 9l-5 5"/>',
+  enter: '<path d="M20 5v7a3 3 0 0 1-3 3H5"/><path d="m9 11-4 4 4 4"/>',
   close: '<path d="M6 6l12 12M18 6 6 18"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
   gear: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
@@ -488,7 +495,7 @@ function inHideWindow() {
 }
 const hiddenNow = () => !!S.settings.privacy && !revealed && (manualHide || inHideWindow());
 /** Kopie der Plan-Daten, damit ein bestätigter Plan sich wiederherstellen lässt */
-const planSnap = (p) => Object.assign({ kind: p.kind, amount: p.amount, cat: p.cat, title: p.title, payee: p.payee || '', acct: p.acct || 'online', repeat: p.repeat || 'none' }, p.month ? { month: p.month } : {}, p.lines ? { lines: p.lines } : {});
+const planSnap = (p) => Object.assign({ kind: p.kind, amount: p.amount, cat: p.cat, title: p.title, payee: p.payee || '', acct: p.acct || 'online', repeat: p.repeat || 'none' }, p.month ? { month: p.month } : {}, p.lines ? { lines: p.lines } : {}, p.backs ? { backs: p.backs } : {});
 function isMasked(abs, force) {
   if (!hiddenNow()) return false;
   if (force) return true;

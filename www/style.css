@@ -722,3 +722,21 @@ body:has(#dock.away) #toast { bottom: calc(env(safe-area-inset-bottom, 0px) + 16
 .ib.filled { flex-grow: 2; }
 .ib.acct { flex: 0 0 auto; }
 .key svg { width: 24px; height: 24px; }
+
+/* v5: Kassenzettel mit Rechner, Diagramm antippbar */
+.seg-arc, .d-bubble { cursor: pointer; }
+.d-center { pointer-events: auto; cursor: pointer; }
+.donut-btn { cursor: pointer; }
+.ln-amt { border: none; background: none; color: inherit; padding: 6px 0; text-align: right; display: inline-flex; align-items: baseline; gap: 0; }
+button.ln-amt small { margin-right: 6px; }
+.ln.live .ln-amt { color: var(--accent); }
+.ln.live .ln-amt.pos { color: var(--pos); }
+.slip.single .sum { display: none; }
+.slip.single .ln.item { min-height: 64px; }
+.slip.single .ln.item .ln-amt { font-size: 34px; }
+.slip.single .ln.item.live { background: none; margin: 0; padding: 0; }
+.perf { width: calc(100% + 8px); background: none; text-align: left; border-left: none; border-right: none; border-bottom: none; }
+.perf-add { margin-left: auto; width: 30px; height: 30px; border-radius: 10px; background: var(--accentSoft); color: var(--accent); display: inline-flex; align-items: center; justify-content: center; }
+.perf-add svg { width: 16px; height: 16px; }
+.ln.got { opacity: .65; }
+.ln.got .ln-x { color: var(--pos); }
