@@ -62,7 +62,6 @@ VIEWS.einstellungen = {
 
       <section class="card glass pad-s">
         <h2 class="h2">Extras</h2>
-        ${tog('s-debts', st.debts, 'people', 'Schulden & Mitbringen', 'Zusätzlicher Tab: wer dir was schuldet, Mitgebrachtes und Zahlungen von Freunden.')}
         ${tog('s-jump', st.jumpHome !== false, 'home', 'Nach einer Pause zur Startseite', 'Öffnest du die App nach mehr als 2 Minuten wieder, landest du auf Start.')}
       </section>
 
@@ -76,7 +75,10 @@ VIEWS.einstellungen = {
         ${S.demo ? `<button type="button" class="btn ghost" id="s-demo">${svg('sparkle')}Beispieldaten löschen</button>` : ''}
         <button type="button" class="btn danger" id="s-wipe">${svg('trash')}Alle Daten löschen</button>
       </section>
-      <p class="small center-txt">Geld · Version 3.3${window.BUILD && window.BUILD !== 'dev' ? ' · Build ' + esc(window.BUILD) : ''} · offline</p>
+      <section class="card glass pad-s">
+        <button type="button" class="row" id="s-news">${catIcon({ color: 'var(--accent)', icon: 'sparkle' }, 42)}<span class="grow"><span class="r-title">Was ist neu</span><span class="r-sub">Version ${APP_VERSION}</span></span>${svg('next')}</button>
+      </section>
+      <p class="small center-txt">Geld · Version ${APP_VERSION}${window.BUILD && window.BUILD !== 'dev' ? ' · Build ' + esc(window.BUILD) : ''} · offline</p>
     </div>`;
   },
   mount() {
@@ -119,7 +121,7 @@ VIEWS.einstellungen = {
     $('#s-cat-out').onclick = () => go('kategorien/out');
     $('#s-cat-in').onclick = () => go('kategorien/in');
     $('#s-snacks').onclick = () => go('snacks');
-    $('#s-debts').onclick = () => set('debts', !st.debts);
+    $('#s-news').onclick = () => go('neuigkeiten');
     $('#s-jump').onclick = () => set('jumpHome', st.jumpHome === false);
     $('#s-export').onclick = exportBackup;
     $('#s-import-file').addEventListener('change', (e) => importBackup(e.target.files[0]));

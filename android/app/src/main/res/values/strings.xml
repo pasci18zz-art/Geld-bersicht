@@ -4,6 +4,7 @@
     <string name="title_activity_main">Geld</string>
     <string name="package_name">de.pasci.geld</string>
     <string name="custom_url_scheme">de.pasci.geld</string>
+    <string name="share_label">Bon in Geld einlesen</string>
     <string name="sc_add_short">Eintragen</string>
     <string name="sc_bring_short">Mitgebracht</string>
     <string name="sc_bring_long">Mitgebracht eintragen</string>

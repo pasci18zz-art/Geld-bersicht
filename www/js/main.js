@@ -26,6 +26,7 @@ function onResume() {
   revealed = false;
   applyAutoPlans();
   syncNotifications();
+  checkSharedImage();
   if (wasAway && lockOn() && away >= (S.settings.lockDelay || 0) * 1000) showLock();
   if (S.settings.jumpHome !== false && away > AWAY_MS && Date.now() - actionAt > 3000 && curPath() !== homeTab()) { tabTo(homeTab(), 'fade'); return; }
   render(false);
@@ -150,26 +151,28 @@ function initNotifications() {
 function handleActionUrl(url) {
   const m = /^geld:\/\/([a-z]+)/i.exec(url || '');
   if (!m) return;
-  const debts = S.settings.debts;
   const path = {
     eintragen: 'neu/out',
-    mitbringen: debts ? 'schnell/mitbringen' : 'neu/lidl',
-    zahlung: debts ? 'schnell/zahlung' : 'neu/refund',
+    mitbringen: 'neu/lidl',
+    zahlung: 'offen',
     ausgabe: 'neu/out',
     lidl: 'neu/lidl'
   }[m[1].toLowerCase()];
   if (!path) return;
   actionAt = Date.now();
   closeSheetNow();
+  if (path === 'offen') { tabTo('offen'); return; }
   stack = [homeTab()];
   go(path, 'fwd');
 }
 
 function boot() {
+  try { history.scrollRestoration = 'manual'; } catch (e) { /* egal */ }
   applyAutoPlans();
   stack = [homeTab()];
   bindSwipe();
   render(true);
+  maybeShowNews();
   if (lockOn()) showLock();
   // Kurzbefehle der Web-Version: ?a=eintragen | mitbringen | zahlung | ausgabe | lidl
   const a = new URLSearchParams(location.search).get('a');
@@ -190,6 +193,7 @@ function boot() {
       if (App.getLaunchUrl) App.getLaunchUrl().then((r) => { if (r && r.url) handleActionUrl(r.url); }).catch(() => { /* kein Start über eine Aktion */ });
     }
     initNotifications();
+    checkSharedImage();
     if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister())).catch(() => {});
   } else if ('serviceWorker' in navigator && window.top === window && /^https?:$/.test(location.protocol)) {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));

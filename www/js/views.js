@@ -307,7 +307,7 @@ VIEWS.kat = {
     const gross = list.filter((t) => t.kind !== 'refund').reduce((s, t) => s + t.amount, 0);
     const back = list.filter((t) => t.kind === 'refund').reduce((s, t) => s + t.amount, 0);
     const budget = c.kind === 'out' && r.type === 'm' ? c.budget : 0;
-    const openBacks = S.plans.filter((p) => p.kind === 'refund' && p.cat === catId);
+    const openBacks = S.plans.filter((p) => p.kind === 'refund' && p.cat === catId && refundLeft(p) > 0);
     return `<div class="page">
       <div class="topbar-row"><button type="button" class="icon-btn glass" id="back" aria-label="Zurück">${svg('back')}</button><span class="grow"></span>
         <button type="button" class="icon-btn glass" id="k-edit" aria-label="Kategorie bearbeiten">${svg('edit')}</button></div>
@@ -322,7 +322,7 @@ VIEWS.kat = {
           <div><span class="small">Budget</span><span class="b">${budget ? money(budget) : '–'}</span></div></div>` : ''}
         ${budget ? `<div class="bar big"><i style="width:${clamp(Math.round((gross - back) / budget * 100), 0, 100)}%;background:${gross - back > budget ? 'var(--neg)' : c.color}"></i></div>` : ''}
       </section>
-      ${openBacks.length ? `<section class="card glass pad-s"><h2 class="h2">Kommt noch zurück</h2>${openBacks.map((p, i) => planRowHTML(p, i, true)).join('')}</section>` : ''}
+      ${openBacks.length ? `<section class="card glass pad-s"><h2 class="h2">Kommt noch zurück</h2>${openBacks.map((p, i) => refundItemHTML(p, i)).join('')}</section>` : ''}
       <section class="card glass pad-s">${list.length ? list.map((t, i) => txRow(t, i)).join('') : emptyHTML(c.icon, 'Hier ist noch nichts.')}</section>
     </div>`;
   },
@@ -330,7 +330,7 @@ VIEWS.kat = {
     const [catId] = arg.split('/');
     $('#back').onclick = () => goBack();
     $('#k-edit').onclick = () => catSheet(catId);
-    bindPlanRows($('#view'));
+    $$('[data-ofp]').forEach((b) => b.onclick = () => { const p = S.plans.find((x) => x.id === b.dataset.ofp); if (p) receiveSheet(p.payee || 'Ohne Namen', [p]); });
     bindTxRows($('#view'));
   }
 };
@@ -432,7 +432,7 @@ function planRowHTML(p, i, compact) {
 }
 /** Geplante Buchung jetzt buchen (innerhalb von commit aufrufen) */
 function bookPlan(p) {
-  const t = { id: uid(), kind: p.kind, amount: p.amount, cat: p.cat, title: p.title || (p.kind === 'refund' ? 'Rückzahlung' : ''), payee: p.payee || '', date: todayStr(), ts: Date.now(), planId: p.id, acct: p.acct || (p.kind === 'refund' ? 'bar' : 'online'), planDue: p.date || null, planSnap: planSnap(p) };
+  const t = { id: uid(), kind: p.kind, amount: p.kind === 'refund' ? refundLeft(p) : p.amount, cat: p.cat, title: p.title || (p.kind === 'refund' ? 'Rückzahlung' : ''), payee: p.payee || '', date: todayStr(), ts: Date.now(), planId: p.id, acct: p.acct || (p.kind === 'refund' ? 'bar' : 'online'), planDue: p.date || null, planSnap: planSnap(p) };
   if (p.kind === 'refund') t.month = p.month || curMonth();
   if (p.lines) t.lines = p.lines;
   if (p.backs) { t.backs = p.backs; S.plans.forEach((x) => { if (x.fromId === p.id) x.fromId = t.id; }); }
@@ -473,7 +473,7 @@ function bindPlanRows(root = document) {
 VIEWS.geplant = {
   nav: 'geplant',
   html() {
-    const list = S.plans.slice().sort(planOrder);
+    const list = S.plans.filter((p) => p.kind !== 'refund').sort(planOrder);
     const bal = balance(); const sum = planSum();
     const done = doneList();
     return `<div class="page">
@@ -505,7 +505,7 @@ VIEWS.geplant = {
 let doneOpen = false;
 function doneList() {
   const from = addDays(todayStr(), -7);
-  return S.tx.filter((t) => t.planId && !t.doneHidden && t.date >= from).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  return S.tx.filter((t) => t.planId && t.kind !== 'refund' && !t.doneHidden && t.date >= from).sort((a, b) => (b.ts || 0) - (a.ts || 0));
 }
 function doneRowHTML(t, i) {
   const c = catById(t.cat); const isIn = t.kind !== 'out';
@@ -543,17 +543,20 @@ const hasOp = (e) => /[+×]/.test(e || '');
 /** Kassenzettel aus einer gespeicherten Buchung/Planung laden */
 function loadSlip(x) {
   F.lines = x.lines && x.lines.length
-    ? x.lines.map((l) => ({ name: l.name || '', expr: l.expr || (l.qty > 1 ? `${l.qty}×${centsToInput(l.c)}` : centsToInput(l.c)) }))
+    ? x.lines.map((l) => Object.assign({ name: l.name || '', expr: l.expr || (l.qty > 1 ? `${l.qty}×${centsToInput(l.c)}` : centsToInput(l.c)) }, l.shares ? { shares: l.shares.map((s) => Object.assign({}, s)) } : {}))
     : [{ name: '', expr: centsToInput(x.amount) }];
   F.backs = (x.backs || []).map((b) => {
     const open = b.planId && S.plans.some((p) => p.id === b.planId);
     const got = !open && b.planId && S.tx.some((t) => t.planId === b.planId);
-    return open || got ? { who: b.who || '', expr: b.expr || centsToInput(b.c), c: b.c, planId: b.planId, got: !!got } : null;
+    return open || got ? { who: b.who || '', expr: b.expr || centsToInput(b.c), c: b.c, planId: b.planId, got: !!got, auto: !!b.auto } : null;
   }).filter(Boolean);
   F.act = { sec: 'item', i: F.lines.length - 1 };
 }
 function slipKey(k) {
-  const L = fLine(); if (!L || L.got) return;
+  // Keine Zeile aktiv (z. B. nach dem Bon): Zahl tippen beginnt einen neuen Posten
+  if (!fLine() && k !== 'back') { if (!/^[\d,]$/.test(k)) return; F.lines.push({ name: '', expr: '' }); F.act = { sec: 'item', i: F.lines.length - 1 }; }
+  const L = fLine();
+  if (k !== 'back' && (!L || L.got)) return;
   const e = L.expr; const last = e.slice(-1); const cur = e.split(/[+×]/).pop();
   if (/^\d$/.test(k)) { const n = (cur === '0' ? '' : cur) + k; const [i, d] = n.split(','); if (i.length > 6 || (d && d.length > 2)) return; L.expr = (cur === '0' ? e.slice(0, -1) : e) + k; }
   else if (k === ',') { if (cur.includes(',')) return; L.expr = e + (cur === '' ? '0,' : ','); }
@@ -580,7 +583,7 @@ function slipKey(k) {
 }
 /** Leere Zeilen weg (außer der ersten), bevor gespeichert oder umgeschaltet wird */
 function tidySlip() {
-  F.lines = F.lines.filter((l, i) => i === 0 || calcExpr(l.expr) > 0 || l.name.trim());
+  F.lines = F.lines.filter((l, i) => i === 0 || calcExpr(l.expr) !== 0 || l.name.trim());
   F.backs = F.backs.filter((b) => b.got || calcExpr(b.expr) > 0);
 }
 /** Namen vorschlagen: zuletzt benutzte zuerst, passend zu den getippten Buchstaben, höchstens 4 */
@@ -679,14 +682,20 @@ function areaHTML() {
     if (act) return `${open}${sign}${expr ? esc(expr) : '0'}${caret} €</button>`;
     return `${open}${sign}${eur(v)}</button>`;
   };
-  const single = F.lines.length === 1 && !F.backs.length && F.act.sec === 'item';
+  const single = F.lines.length === 1 && !F.backs.length && F.act.sec === 'item' && !F.bon;
+  const showWho = !single;
   const pool = personPool(); const used = F.backs.map((b) => b.who);
   const t = fItems(); const net = t - fBacks();
-  const backRows = F.backs.map((b, i) => b.got
+  const bonOk = F.bon && F.bon.total != null ? F.bon.total === t : null;
+  const backRows = F.backs.map((b, i) => b.auto && !b.got
+    ? `<div class="back-row"><div class="ln auto"><span class="nm">${esc(b.who)}</span><span class="dots"></span><span class="ln-amt pos">${hasOp(b.expr) ? `<small>${exprShow(b.expr)} =</small>` : ''}+${eur(calcExpr(b.expr))}</span><button type="button" class="ln-x" data-bauto="${esc(b.who)}" aria-label="${esc(b.who)} entfernen">${svg('close')}</button></div></div>`
+    : b.got
     ? `<div class="back-row"><div class="ln got"><span class="nm">${esc(b.who || 'Rückzahlung')}</span><span class="dots"></span><span class="ln-amt pos">+${eur(b.c)}</span><span class="ln-x" title="Erhalten">${svg('check')}</span></div></div>`
     : `<div class="back-row"><div class="ln${isAct('back', i) ? ' live' : ''}"><input class="nm" data-bwho="${i}" placeholder="Von wem?" value="${esc(b.who)}" maxlength="30" autocomplete="off" aria-label="Von wem"><span class="dots"></span>${amtHTML(b.expr, 'back', i, '+')}<button type="button" class="ln-x" data-bdel="${i}" aria-label="Zeile löschen">${svg('close')}</button></div><div class="sugg">${b.who ? '' : suggHTML(nameSuggest(pool, '', used), `data-bpick="${i}" data-name`)}</div></div>`).join('');
   return `<div class="slipwrap"><section class="slip${single ? ' single' : ''}" aria-label="Kassenzettel">
-    ${F.lines.map((l, i) => `<div class="ln item${isAct('item', i) ? ' live' : ''}"><input class="nm" data-lname="${i}" placeholder="${single ? 'Was?' : 'Posten ' + (i + 1)}" value="${esc(l.name)}" maxlength="30" autocomplete="off" aria-label="Name von Posten ${i + 1}"><span class="dots"></span>${amtHTML(l.expr, 'item', i, '')}${F.lines.length > 1 ? `<button type="button" class="ln-x" data-ldel="${i}" aria-label="Posten löschen">${svg('close')}</button>` : '<span class="ln-x"></span>'}</div>`).join('')}
+    ${!F.editId && !F.bon ? `<div class="slip-top"><button type="button" class="bon-btn" id="f-bon">${svg('receipt')}Bon</button></div>` : ''}
+    ${F.bon ? `<div class="slip-top"><span class="bon-stat${bonOk === false ? ' bad' : ''}">${svg(bonOk === false ? 'receipt' : 'check')}${esc(F.bon.store || 'Bon')}${F.bon.total != null ? ' · ' + eur(F.bon.total) : ''}</span><button type="button" class="bon-btn" id="f-bon" aria-label="Anderen Bon lesen">${svg('receipt')}</button></div>` : ''}
+    ${F.lines.map((l, i) => `<div class="ln item${isAct('item', i) ? ' live' : ''}"><input class="nm" data-lname="${i}" placeholder="${single ? 'Was?' : 'Posten ' + (i + 1)}" value="${esc(l.name)}" maxlength="30" autocomplete="off" aria-label="Name von Posten ${i + 1}"><span class="dots"></span>${amtHTML(l.expr, 'item', i, '')}${F.lines.length > 1 ? `<button type="button" class="ln-x" data-ldel="${i}" aria-label="Posten löschen">${svg('close')}</button>` : '<span class="ln-x"></span>'}</div>${showWho ? `<div class="ln-who"><button type="button" class="who-chip${(l.shares || []).some((x) => x.who) ? ' on' : ''}" data-who="${i}" aria-label="Für wen: ${esc(shareLabel(l))}">${svg('people')}${esc(shareLabel(l))}</button></div>` : ''}`).join('')}
     <div class="sum"><span>Summe</span><span class="ln-amt big">${eur(t)}</span></div>
     <button type="button" class="perf" data-key="back" aria-label="Bekomme ich zurück">${svg('scissors')}Bekomme ich zurück${F.backs.length ? '' : `<span class="perf-add">${svg('plus')}</span>`}</button>
     ${backRows}
@@ -705,7 +714,10 @@ function bindArea() {
   const a = $('#f-area'); if (!a) return;
   $$('[data-lname]', a).forEach((inp) => inp.addEventListener('input', () => { F.lines[+inp.dataset.lname].name = inp.value; }));
   $$('[data-act]', a).forEach((b) => b.onclick = () => { const [sec, i] = b.dataset.act.split(':'); F.act = { sec, i: +i }; vibrate(6); refreshArea(); });
-  $$('[data-ldel]', a).forEach((b) => b.onclick = () => { const i = +b.dataset.ldel; F.lines.splice(i, 1); F.act = { sec: 'item', i: Math.min(F.act.sec === 'item' ? F.act.i : 0, F.lines.length - 1) }; vibrate(8); refreshArea(); });
+  if ($('#f-bon', a)) $('#f-bon', a).onclick = () => pickBon();
+  $$('[data-who]', a).forEach((b) => b.onclick = () => assignSheet(+b.dataset.who));
+  $$('[data-bauto]', a).forEach((b) => b.onclick = () => { const n = b.dataset.bauto.toLowerCase(); F.lines.forEach((l) => { if (l.shares) { l.shares = l.shares.filter((x) => x.who.toLowerCase() !== n); if (!l.shares.length || (l.shares.length === 1 && !l.shares[0].who)) delete l.shares; } }); rebuildAutoBacks(); vibrate(8); refreshArea(); });
+  $$('[data-ldel]', a).forEach((b) => b.onclick = () => { const i = +b.dataset.ldel; F.lines.splice(i, 1); rebuildAutoBacks(); F.act = { sec: 'item', i: Math.min(F.act.sec === 'item' ? F.act.i : 0, F.lines.length - 1) }; vibrate(8); refreshArea(); });
   $$('[data-bdel]', a).forEach((b) => b.onclick = () => { F.backs.splice(+b.dataset.bdel, 1); if (F.act.sec === 'back') F.act = { sec: 'item', i: F.lines.length - 1 }; vibrate(8); refreshArea(); });
   $$('.perf[data-key]', a).forEach((b) => b.onclick = () => { slipKey('back'); vibrate(6); refreshArea(); });
   $$('[data-bwho]', a).forEach((inp) => {
@@ -830,7 +842,7 @@ function dockHTML() {
 function bindDockKeys() {
   const d = $('#dock'); if (!d) return;
   $$('.key', d).forEach((k) => k.onclick = () => {
-    if (F.kind === 'out') { slipKey(k.dataset.key); refreshArea(); }
+    if (F.kind === 'out') { slipKey(k.dataset.key); if (F.act.sec === 'item' && F.lines.some((l) => l.shares)) rebuildAutoBacks(); refreshArea(); }
     else {
       F.amt = pressKey(F.amt, k.dataset.key);
       const a = $('#f-amount'); if (a) { a.innerHTML = `${fSign().s}${esc(F.amt || '0')}<span class="cur">€</span>`; a.classList.remove('bump'); void a.offsetWidth; a.classList.add('bump'); }
@@ -859,8 +871,8 @@ function saveEntry(btn) {
   const payee = F.payee.trim(); let title = (F.title || '').trim();
   const isOut = F.kind === 'out';
   const named = isOut ? F.lines.map((l) => l.name.trim()).filter(Boolean) : [];
-  if (isOut && !title && named.length) title = named.join(', ');
-  const lines = isOut && (F.lines.length > 1 || hasOp(F.lines[0].expr) || F.lines[0].name.trim()) ? F.lines.filter((l) => calcExpr(l.expr) > 0).map((l) => ({ name: l.name.trim(), expr: l.expr.replace(/[+×]$/, ''), c: calcExpr(l.expr) })) : null;
+  if (isOut && !title && named.length && !F.bon) title = named.join(', ');
+  const lines = isOut && (F.lines.length > 1 || hasOp(F.lines[0].expr) || F.lines[0].name.trim() || F.lines[0].shares) ? F.lines.filter((l) => calcExpr(l.expr) !== 0).map((l) => Object.assign({ name: l.name.trim(), expr: l.expr.replace(/[+×−]$/, ''), c: calcExpr(l.expr) }, l.shares ? { shares: l.shares } : {})) : null;
   const r = btn.getBoundingClientRect(); burst(r.left + r.width / 2, r.top + r.height / 2, isOut ? undefined : ['var(--pos)', '#F2C14E', '#2F6FD6']);
   vibrate(15);
   const c = catById(F.cat);
@@ -870,7 +882,7 @@ function saveEntry(btn) {
   else if (F.kind === 'refund') msg = `${eur(amount)} von ${c.name} (${MONTHS[+F.month.slice(5) - 1]}) abgezogen`;
   else if (F.kind === 'transfer') msg = F.acct === 'online' ? `${eur(amount)} abgehoben` : `${eur(amount)} eingezahlt`;
   else msg = F.editId ? 'Gespeichert' : `${F.kind === 'in' ? '+' : '−'}${eur(amount)} eingetragen`;
-  if (newBacks) msg += ` · ${newBacks === 1 ? 'Rückzahlung' : newBacks + ' Rückzahlungen'} in Geplant`;
+  if (newBacks) msg += ` · ${newBacks === 1 ? 'Rückzahlung' : newBacks + ' Rückzahlungen'} in Offen`;
   commit(msg, () => {
     if (payee && F.kind !== 'refund' && F.kind !== 'transfer') S.rules[payee.toLowerCase()] = F.cat;
     let owner;
@@ -899,13 +911,13 @@ function saveEntry(btn) {
 function syncBacks(owner, backs, cat, month) {
   const prev = owner.backs || []; const out = [];
   backs.forEach((b) => {
-    if (b.got) { out.push({ who: b.who, expr: b.expr, c: b.c, planId: b.planId }); return; }
+    if (b.got) { out.push(Object.assign({ who: b.who, expr: b.expr, c: b.c, planId: b.planId }, b.auto ? { auto: true } : {})); return; }
     const c = calcExpr(b.expr); if (c <= 0) return;
     let p = b.planId && S.plans.find((x) => x.id === b.planId);
     if (p) Object.assign(p, { amount: c, payee: b.who.trim(), cat, month });
     else { p = { id: uid(), kind: 'refund', amount: c, cat, title: '', payee: b.who.trim(), date: null, repeat: 'none', acct: 'bar', month, auto: false }; S.plans.push(p); }
     p.fromId = owner.id;
-    out.push({ who: b.who.trim(), expr: b.expr.replace(/[+×]$/, ''), c, planId: p.id });
+    out.push(Object.assign({ who: b.who.trim(), expr: b.expr.replace(/[+×]$/, ''), c, planId: p.id }, b.auto ? { auto: true } : {}));
   });
   prev.forEach((pb) => { if (pb.planId && !out.some((o) => o.planId === pb.planId)) S.plans = S.plans.filter((x) => x.id !== pb.planId); });
   if (out.length) owner.backs = out; else delete owner.backs;

@@ -67,7 +67,7 @@ function parseEur(s) {
 }
 /** Rechenzeile wie „3×1,79+2,49“ → Cent (Punkt vor Strich) */
 function calcExpr(e) {
-  e = String(e || '').replace(/[+×]$/, ''); if (!e) return 0;
+  e = String(e || '').replace(/[+×−]$/, '').replace(/−/g, '+-'); if (!e) return 0;
   const sum = e.split('+').reduce((s, term) => s + term.split('×').reduce((a, x) => a * (parseFloat(x.replace(',', '.')) || 0), 1), 0);
   return Math.round(sum * 100);
 }
@@ -89,6 +89,7 @@ const I = {
   keypad: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M7 9h.01M11 9h.01M15 9h.01M7 12h.01M11 12h.01M15 12h.01M8 15.5h8" stroke-width="2.4"/>',
   bksp: '<path d="M9 5h11a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H9l-6-7z"/><path d="m12 9 5 5M17 9l-5 5"/>',
   enter: '<path d="M20 5v7a3 3 0 0 1-3 3H5"/><path d="m9 11-4 4 4 4"/>',
+  receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/>',
   close: '<path d="M6 6l12 12M18 6 6 18"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
   gear: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
@@ -303,6 +304,15 @@ function normalize(o) {
   ['cats', 'tx', 'plans', 'people', 'debts', 'products', 'goals'].forEach((k) => { if (!Array.isArray(s[k])) s[k] = d[k] || []; });
   if (!s.rules || typeof s.rules !== 'object') s.rules = {};
   if (!s.settings.hideWin || typeof s.settings.hideWin !== 'object') s.settings.hideWin = d.settings.hideWin;
+  // Alter Schulden-Tab → „Offen“: wer noch etwas schuldet, wird zur offenen Rückzahlung
+  if (!s.settings.migOffen) {
+    s.settings.migOffen = true;
+    (s.people || []).forEach((pp) => {
+      const bal = s.debts.filter((x) => x.personId === pp.id).reduce((a, x) => a + (x.type === 'pay' ? x.amount : -x.amount), 0);
+      if (bal < 0 && !s.plans.some((p) => p.id === 'mo' + pp.id)) s.plans.push({ id: 'mo' + pp.id, kind: 'refund', amount: -bal, cat: 'c_lidl', title: 'Mitgebracht', payee: pp.name, date: null, repeat: 'none', acct: 'bar', month: curMonth(), auto: false });
+    });
+    s.settings.debts = false;
+  }
   s.cats.forEach((c) => { if (c.id === 'c_monster' && c.icon === 'can') c.icon = 'monster'; });
   if (!s.cats.some((c) => c.kind === 'out')) s.cats = s.cats.concat(d.cats.filter((c) => c.kind === 'out'));
   if (!s.cats.some((c) => c.kind === 'in')) s.cats = s.cats.concat(d.cats.filter((c) => c.kind === 'in'));
@@ -314,6 +324,8 @@ const store = {
 };
 /** Läuft die App als Android-App (Capacitor)? */
 function isNative() { return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()); }
+/** Gab es schon Daten? (dann zeigt „Was ist neu“ nach einem Update) */
+const HAD_DATA = !!(store.get(KEY) || store.get(KEY_V1));
 let S = load();
 function load() {
   try {
@@ -458,7 +470,9 @@ function setCashAnchor(cents) {
   S.settings.cashDate = todayStr();
   S.settings.cashTs = Date.now();
 }
-const planSum = () => S.plans.reduce((s, p) => s + (p.kind === 'out' ? -p.amount : p.amount), 0);
+const planSum = () => S.plans.reduce((s, p) => s + (p.kind === 'refund' ? 0 : p.kind === 'out' ? -p.amount : p.amount), 0);
+/** Offene Rückzahlung: was davon noch fehlt (Teilbeträge zählen) */
+const refundLeft = (p) => Math.max(0, p.amount - (p.paid || 0));
 /** Geplant sortieren: nach Datum, offene Rückzahlungen („kommt noch“, ohne Datum) ans Ende */
 const planOrder = (a, b) => (a.date || '9999').localeCompare(b.date || '9999');
 

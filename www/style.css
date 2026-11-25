@@ -744,3 +744,56 @@ button.ln-amt small { margin-right: 6px; }
 /* Wischen: Nachbarseite liegt fertig daneben */
 #peek { position: fixed; inset: 0; z-index: 1; overflow: hidden; pointer-events: none; }
 .peek-inner { position: absolute; will-change: transform; }
+
+/* ================= v3.4: Bon, Aufteilen, Offen, Was ist neu ================= */
+.slip-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: -2px 0 6px; }
+.bon-btn { height: 34px; padding: 0 12px; border-radius: 17px; border: none; background: var(--accentSoft); color: var(--accent); font-weight: 800; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; margin-left: auto; transition: transform .25s var(--spring); }
+.bon-btn svg { width: 17px; height: 17px; }
+.bon-btn:active { transform: scale(.92); }
+.bon-stat { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; font-size: 13px; color: var(--pos); min-width: 0; }
+.bon-stat svg { width: 16px; height: 16px; stroke-width: 2.6; flex-shrink: 0; }
+.bon-stat.bad { color: var(--neg); }
+.ln-who { display: flex; margin: -6px 0 4px; }
+.who-chip { height: 26px; padding: 0 10px; border-radius: 13px; border: none; background: var(--chip-2); color: var(--sub); font-weight: 700; font-size: 12px; display: inline-flex; align-items: center; gap: 5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: transform .25s var(--spring), background .2s; }
+.who-chip svg { width: 14px; height: 14px; flex-shrink: 0; }
+.who-chip.on { background: var(--accentSoft); color: var(--accent); }
+.who-chip:active { transform: scale(.94); }
+.ln.auto .nm { color: var(--text); font-weight: 700; }
+.as-rows { display: flex; flex-direction: column; gap: 6px; }
+.as-row { display: flex; align-items: center; gap: 8px; padding: 6px 4px 6px 12px; border-radius: 14px; background: var(--chip); }
+.as-w { min-width: 22px; text-align: center; font-family: var(--font-num); font-weight: 600; font-size: 17px; }
+.as-c { min-width: 74px; text-align: right; font-family: var(--font-num); font-weight: 600; }
+.chip.on svg { width: 14px; height: 14px; }
+
+.of-total { display: flex; flex-direction: column; align-items: center; padding: 18px; gap: 2px; }
+.of-sum { font-family: var(--font-num); font-size: 40px; font-weight: 600; color: var(--pos); line-height: 1.1; }
+.of-person { display: flex; flex-direction: column; gap: 2px; animation: cardIn .5s var(--spring) backwards; animation-delay: calc(var(--i) * 50ms); }
+.of-head { display: flex; align-items: center; gap: 12px; padding: 6px 4px 8px; }
+.of-head .b.block { font-size: 17px; }
+.of-left { font-family: var(--font-num); font-size: 22px; font-weight: 600; color: var(--pos); }
+.of-item { padding-left: 4px; }
+.of-get { margin-top: 6px; }
+.amt-field input { font-family: var(--font-num); font-size: 22px; font-weight: 600; }
+
+.wn-page { gap: 14px; }
+.wn-hero { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 0 4px; }
+.wn-hero h1 { margin: 0; font-size: 34px; font-weight: 800; letter-spacing: -0.02em; }
+.wn-badge { padding: 5px 12px; border-radius: 999px; background: var(--accent); color: var(--accentInk); font-weight: 800; font-size: 12.5px; animation: cardIn .6s var(--spring) backwards; }
+.wn-item { display: flex; gap: 14px; align-items: flex-start; padding: 10px 2px; animation: cardIn .55s var(--spring) backwards; animation-delay: calc(120ms + var(--i) * 70ms); }
+.wn-item + .wn-item { border-top: 1px solid var(--line); }
+.wn-ic { width: 42px; height: 42px; border-radius: 14px; background: var(--accentSoft); color: var(--accent); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.wn-ic svg { width: 22px; height: 22px; }
+.wn-item .small { display: block; margin-top: 2px; line-height: 1.4; }
+.wn-old { padding: 6px 16px; }
+.wn-old summary { list-style: none; display: flex; align-items: center; gap: 6px; min-height: 46px; cursor: pointer; color: var(--sub); font-weight: 600; }
+.wn-old summary::-webkit-details-marker { display: none; }
+.wn-old summary svg { width: 16px; height: 16px; margin-left: auto; transition: transform .3s var(--spring); }
+.wn-old[open] summary svg { transform: rotate(90deg); }
+.block { display: block; }
+
+.busy { position: fixed; inset: 0; z-index: 90; background: rgba(8, 20, 14, .35); display: flex; align-items: center; justify-content: center; animation: fadeIn .2s; }
+@keyframes fadeIn { from { opacity: 0; } }
+.busy-box { display: flex; align-items: center; gap: 12px; padding: 16px 22px; border-radius: 20px; background: var(--card-solid); box-shadow: 0 14px 34px rgba(0, 0, 0, .25); }
+.spinner { width: 22px; height: 22px; border-radius: 50%; border: 3px solid var(--accentSoft); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.ln.live + .ln-who { margin-top: 4px; }

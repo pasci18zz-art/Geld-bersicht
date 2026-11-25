@@ -167,7 +167,7 @@ let navDir = 'fade';
 let scrollMem = {};
 let lastKey = '';
 const homeTab = () => 'start';
-const TAB_ORDER = () => ['start', 'buchungen', 'geplant', 'auswertung'].concat(S.settings.debts ? ['schulden'] : []);
+const TAB_ORDER = () => ['start', 'buchungen', 'geplant', 'offen', 'auswertung'];
 const curPath = () => stack[stack.length - 1] || homeTab();
 function parsePath(p) { const i = p.indexOf('/'); return i < 0 ? { name: p, arg: '' } : { name: p.slice(0, i), arg: p.slice(i + 1) }; }
 const route = () => parsePath(curPath());
@@ -233,8 +233,8 @@ function render(changed) {
 
 /* ---------- Leiste unten ---------- */
 const NAV_ITEMS = () => [
-  ['start', 'home', 'Start'], ['buchungen', 'list', 'Buchungen'], ['+'], ['geplant', 'calendar', 'Geplant'], ['auswertung', 'chart', 'Auswertung']
-].concat(S.settings.debts ? [['schulden', 'people', 'Schulden']] : []);
+  ['start', 'home', 'Start'], ['buchungen', 'list', 'Buchungen'], ['+'], ['geplant', 'calendar', 'Geplant'], ['offen', 'wallet', 'Offen'], ['auswertung', 'chart', 'Auswertung']
+];
 let navSig = '';
 function renderNav(active) {
   const nav = $('#nav');
