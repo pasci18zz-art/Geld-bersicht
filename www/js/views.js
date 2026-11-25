@@ -479,6 +479,7 @@ VIEWS.geplant = {
     return `<div class="page">
       <header class="hero"><div class="grow"><div class="sub">Kommt noch</div><h1>Geplant</h1></div>
         <div class="hero-actions"><button type="button" class="icon-btn glass primary" id="p-add" aria-label="Neue geplante Buchung">${svg('plus')}</button></div></header>
+      ${gpSegHTML('geplant')}
       <section class="card glass forecast">
         <div class="fc-col"><span class="small">Jetzt</span><span class="b">${bal === null ? '–' : money(bal, { force: true })}</span></div>
         <span class="fc-arrow">${svg('next')}</span>
@@ -493,6 +494,7 @@ VIEWS.geplant = {
     </div>`;
   },
   mount() {
+    bindGpSeg();
     const add = () => go('neu/plan-out');
     $('#p-add').onclick = add; if ($('#p-add2')) $('#p-add2').onclick = add;
     if ($('#done-toggle')) $('#done-toggle').onclick = () => { doneOpen = !doneOpen; $('#done-box').classList.toggle('open', doneOpen); $('#done-toggle').setAttribute('aria-expanded', doneOpen); };

@@ -95,7 +95,7 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
 /* Seite */
 /* overflow-x: clip – gleitende Seiten dürfen nie über den Rand ragen (sonst zoomt das Handy kurz) */
 /* pan-y: der Browser scrollt nur senkrecht selbst – waagerechtes Wischen bekommt die App (Tabs wechseln) */
-#view { position: relative; z-index: 1; overflow-x: clip; touch-action: pan-y; }
+#view { position: relative; z-index: 1; overflow-x: clip; touch-action: pan-y; min-height: 100vh; min-height: 100dvh; }
 .page {
   max-width: 520px; margin: 0 auto;
   padding-top: calc(env(safe-area-inset-top, 0px) + 8px);
@@ -797,3 +797,4 @@ button.ln-amt small { margin-right: 6px; }
 .spinner { width: 22px; height: 22px; border-radius: 50%; border: 3px solid var(--accentSoft); border-top-color: var(--accent); animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .ln.live + .ln-who { margin-top: 4px; }
+.busy-x { margin-left: 6px; }

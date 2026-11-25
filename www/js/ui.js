@@ -184,7 +184,7 @@ function replaceTo(path, dir = 'fade') {
 function tabTo(name, dir) {
   if (stack.length === 1 && stack[0] === name) { window.scrollTo({ top: 0, behavior: motionOn() ? 'smooth' : 'auto' }); return; }
   const order = TAB_ORDER();
-  const from = order.indexOf((VIEWS[route().name] || {}).nav || '');
+  const from = order.indexOf(route().name) >= 0 ? order.indexOf(route().name) : order.indexOf((VIEWS[route().name] || {}).nav || '');
   const to = order.indexOf(name);
   closeSheetNow();
   stack = [name]; scrollMem = {};
@@ -233,7 +233,7 @@ function render(changed) {
 
 /* ---------- Leiste unten ---------- */
 const NAV_ITEMS = () => [
-  ['start', 'home', 'Start'], ['buchungen', 'list', 'Buchungen'], ['+'], ['geplant', 'calendar', 'Geplant'], ['offen', 'wallet', 'Offen'], ['auswertung', 'chart', 'Auswertung']
+  ['start', 'home', 'Start'], ['buchungen', 'list', 'Buchungen'], ['+'], ['geplant', 'calendar', 'Geplant'], ['auswertung', 'chart', 'Auswertung']
 ];
 let navSig = '';
 function renderNav(active) {
@@ -338,7 +338,8 @@ function makePeek(name) {
   return inner;
 }
 function navGeom(name) {
-  const b = $(`#nav .nav-tab[data-tab="${name}"]`);
+  const tab = (VIEWS[name] && VIEWS[name].nav) || name; // „Offen“ gehört zum Tab „Geplant“
+  const b = $(`#nav .nav-tab[data-tab="${tab}"]`);
   return b ? { x: b.offsetLeft, w: b.offsetWidth } : null;
 }
 function paintSwipe() {

@@ -12,6 +12,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(ShareInPlugin.class);
+        registerPlugin(BonOcrPlugin.class);
         super.onCreate(savedInstanceState);
         readShared(getIntent());
     }

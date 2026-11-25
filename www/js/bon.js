@@ -2,13 +2,17 @@
 'use strict';
 
 /* ================= Was ist neu ================= */
-const APP_VERSION = '3.4';
+const APP_VERSION = '3.5';
 const CHANGELOG = [
+  { v: '3.5', title: 'Offen bei Geplant, Bon schneller', items: [
+    ['calendar', 'Offen ist jetzt bei Geplant', 'Oben zwischen „Geplant“ und „Offen“ umschalten oder von Geplant einfach weiter nach links wischen. Unten sind wieder vier Tabs.'],
+    ['receipt', 'Bon lesen viel schneller', 'Jetzt mit der Texterkennung von Google direkt im Handy, ohne Internet. Meist in unter einer Sekunde.']
+  ] },
   { v: '3.4', title: 'Bons einlesen & Offen', items: [
     ['receipt', 'Bon einlesen', 'Beim Eintragen oben auf „Bon“ tippen und einen Screenshot wählen, zum Beispiel aus Lidl Plus. Posten, Laden, Karte oder Bar landen von selbst auf dem Kassenzettel.'],
     ['share', 'Direkt an Geld teilen', 'In der Galerie oder in Lidl Plus auf „Teilen“ und dann „Geld“ tippen – der Bon wird sofort eingelesen.'],
     ['people', 'Posten aufteilen', 'Unter jedem Posten steht „Ich“. Antippen und auswählen, für wen er war, auch geteilt (z. B. 1 Brot für dich, 1 für Lena). Was dir zusteht, steht automatisch unter „Bekomme ich zurück“.'],
-    ['wallet', 'Neuer Tab „Offen“', 'Wer dir wie viel schuldet, nach Personen sortiert. „Geld bekommen“ geht auch mit Teilbeträgen. Ersetzt den alten Schulden-Tab.'],
+    ['wallet', '„Offen“', 'Wer dir wie viel schuldet, nach Personen sortiert. „Geld bekommen“ geht auch mit Teilbeträgen. Ersetzt den alten Schulden-Tab.'],
     ['sparkle', 'Was ist neu', 'Dieser Bildschirm kommt nach jedem Update einmal. Später findest du ihn in den Einstellungen.']
   ] },
   { v: '3.3', title: 'Flüssiges Wischen', items: [
@@ -55,22 +59,25 @@ function maybeShowNews() {
   return show;
 }
 
-/* ================= Texterkennung (offline, tesseract) ================= */
-let ocrWorker = null;
-function loadScript(src) {
-  return new Promise((res, rej) => {
-    if (window.Tesseract) { res(); return; }
-    const s = document.createElement('script'); s.src = src; s.onload = () => res(); s.onerror = () => rej(new Error('script'));
-    document.head.appendChild(s);
+/* ================= Texterkennung (Google ML Kit im Handy, offline) ================= */
+/** Zeilen mit Position → Text Zeile für Zeile (Name links und Preis rechts landen in derselben Zeile) */
+function rowsFromLines(lines) {
+  const ls = lines.filter((l) => l && l.t).map((l) => ({ t: l.t, x: l.x, h: Math.max(1, l.h), cy: l.y + l.h / 2 })).sort((a, b) => a.cy - b.cy);
+  const rows = [];
+  ls.forEach((l) => {
+    const r = rows.find((q) => Math.abs(q.cy - l.cy) < Math.min(q.h, l.h) * 0.6);
+    if (r) { r.items.push(l); r.cy = (r.cy * r.n + l.cy) / (r.n + 1); r.n++; r.h = Math.max(r.h, l.h); } else rows.push({ cy: l.cy, h: l.h, n: 1, items: [l] });
   });
+  return rows.sort((a, b) => a.cy - b.cy).map((r) => r.items.sort((a, b) => a.x - b.x).map((i) => i.t).join(' ')).join('\n');
 }
 async function runOCR(img) {
-  const base = new URL('vendor/tess/', location.href).href;
-  await loadScript(base + 'tesseract.min.js');
-  if (!ocrWorker) ocrWorker = await window.Tesseract.createWorker('deu', 1, { workerPath: base + 'worker.min.js', corePath: base, langPath: base, cacheMethod: 'none', gzip: true });
-  const { data } = await ocrWorker.recognize(img);
-  return data.text || '';
+  const C = window.Capacitor;
+  const P = isNative() && C && ((C.Plugins && C.Plugins.BonOcr) || (C.registerPlugin ? C.registerPlugin('BonOcr') : null));
+  if (!P || !P.read) throw new Error('web');
+  const r = await P.read({ data: img });
+  return r && r.lines && r.lines.length ? rowsFromLines(r.lines) : ((r && r.text) || '');
 }
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
 
 /* ================= Bon verstehen ================= */
 const STORES = [['Lidl', /\blidl\b/i], ['Aldi', /\baldi\b/i], ['Rewe', /\brewe\b/i], ['Edeka', /\bedeka\b/i], ['Netto', /\bnetto\b(?! *\d)/i], ['Penny', /\bpenny\b/i],
@@ -84,6 +91,7 @@ function parseReceipt(text) {
   const head = raw.slice(0, 5).map((l) => l.replace(/\s/g, ''));
   if (head.some((l) => /^l\W{0,2}[i1l|!]?\W{0,2}d\W{0,2}[l1|i]$/i.test(l))) r.store = 'Lidl';
   if (!r.store) { const st = STORES.find(([, re]) => re.test(text)); if (st) r.store = st[0]; }
+  if (!r.store && /\bzu zahlen\b/i.test(text)) r.store = 'Lidl'; // Lidl-Bons: Logo ist ein Bild, aber „Zu zahlen“ steht nur bei Lidl
   const reQty = new RegExp(`^(.*?)\\s+(\\d+[.,]\\d{2})\\s*[x×*]\\s*(\\d{1,3})\\s+${MONEY_RE}\\s*[A-Z]{0,2}\\*?$`, 'i');
   const reQty2 = new RegExp(`^(.*?)\\s+(\\d{1,3})\\s*[x×*]\\s*(\\d+[.,]\\d{2})\\s+${MONEY_RE}\\s*[A-Z]{0,2}\\*?$`, 'i');
   const reItem = new RegExp(`^(.*?[A-Za-zÄÖÜäöüß].*?)\\s+${MONEY_RE}\\s*(?:[A-Z]{1,2}\\*?|\\*)?$`);
@@ -128,16 +136,19 @@ function pickBon() {
   inp.onchange = () => { const f = inp.files && inp.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => importBon(rd.result); rd.readAsDataURL(f); };
   inp.click();
 }
-function busyOverlay(text) {
+function busyOverlay(text, onCancel) {
   const el = document.createElement('div'); el.className = 'busy'; el.setAttribute('role', 'status');
-  el.innerHTML = `<div class="busy-box"><span class="spinner" aria-hidden="true"></span><span class="b">${esc(text)}</span></div>`;
+  el.innerHTML = `<div class="busy-box"><span class="spinner" aria-hidden="true"></span><span class="b">${esc(text)}</span>${onCancel ? '<button type="button" class="link busy-x">Abbrechen</button>' : ''}</div>`;
+  if (onCancel) $('.busy-x', el).onclick = onCancel;
   document.body.appendChild(el); return el;
 }
 async function importBon(src) {
   if (!F || route().name !== 'neu') return;
-  const busy = busyOverlay('Bon wird gelesen …');
+  let cancelled = false;
+  const busy = busyOverlay('Bon wird gelesen …', () => { cancelled = true; busy.remove(); });
   try {
-    const text = await runOCR(src);
+    const text = await withTimeout(runOCR(src), 30000);
+    if (cancelled) return;
     const r = parseReceipt(text);
     if (!r.items.length) { toast('Auf dem Bild wurden keine Posten erkannt'); return; }
     F.kind = 'out';
@@ -156,7 +167,9 @@ async function importBon(src) {
     vibrate(15);
     render(false);
   } catch (e) {
-    toast(isNative() || /^https?:$/.test(location.protocol) ? 'Der Bon konnte nicht gelesen werden' : 'Bon lesen geht nur in der App');
+    if (cancelled) return;
+    const m = (e && e.message) || '';
+    toast(m === 'web' ? 'Bon lesen geht nur in der App' : m === 'timeout' ? 'Das Lesen hat zu lange gedauert – versuch es nochmal' : 'Der Bon konnte nicht gelesen werden');
   } finally { busy.remove(); }
 }
 /** Bild wurde von außen an Geld geteilt (Galerie, Lidl Plus …) */
@@ -270,13 +283,19 @@ function refundItemHTML(p, i) {
     <span class="grow"><span class="r-title ell">${esc(w.title)}</span><span class="r-sub ell">${esc(w.sub || c.name)}${p.paid ? ` · ${eur(p.paid)} schon bekommen` : ''}</span></span>
     <span class="r-amt pos">${money(refundLeft(p), { force: true })}</span></button>`;
 }
+/** Oben umschalten: Geplant | Offen (beides unter dem Tab „Geplant“) */
+const gpSegHTML = (cur) => segHTML([['geplant', 'Geplant'], ['offen', 'Offen']], cur, 'data-gp', 'aria-label="Geplant oder Offen"');
+function bindGpSeg() {
+  $$('[data-gp]').forEach((b) => b.onclick = () => { if (b.dataset.gp === route().name) return; segMove(b); vibrate(6); setTimeout(() => tabTo(b.dataset.gp), 150); });
+}
 VIEWS.offen = {
-  nav: 'offen',
+  nav: 'geplant',
   html() {
     const groups = openByPerson(); const total = groups.reduce((s, g) => s + g.left, 0);
     return `<div class="page">
       <header class="hero"><div class="grow"><div class="sub">Bekommst du noch</div><h1>Offen</h1></div>
         <div class="hero-actions"><button type="button" class="icon-btn glass primary" id="of-add" aria-label="Jemand schuldet mir etwas">${svg('plus')}</button></div></header>
+      ${gpSegHTML('offen')}
       ${groups.length ? `<section class="card glass of-total"><span class="small">Insgesamt</span><span class="of-sum">${money(total, { force: true })}</span><span class="small">von ${groups.length} ${groups.length === 1 ? 'Person' : 'Personen'}</span></section>
       ${groups.map((g, gi) => `<section class="card glass pad-s of-person" style="--i:${gi}">
         <div class="of-head">${avatarOf(g.name)}<span class="grow"><span class="b block">${esc(g.name)}</span><span class="small">${g.plans.length} ${g.plans.length === 1 ? 'Eintrag' : 'Einträge'}</span></span>
@@ -288,6 +307,7 @@ VIEWS.offen = {
     </div>`;
   },
   mount() {
+    bindGpSeg();
     $('#of-add').onclick = () => debtSheet(); if ($('#of-add2')) $('#of-add2').onclick = () => debtSheet();
     $$('[data-ofget]').forEach((b) => b.onclick = () => { const g = openByPerson().find((x) => x.key === b.dataset.ofget); if (g) receiveSheet(g.name, g.plans); });
     $$('[data-ofp]').forEach((b) => b.onclick = () => {
