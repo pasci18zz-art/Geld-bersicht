@@ -57,6 +57,7 @@ VIEWS.einstellungen = {
         <h2 class="h2">Kategorien</h2>
         <button type="button" class="row" id="s-cat-out">${catIcon({ color: '#E8902E', icon: 'cart' }, 42)}<span class="grow"><span class="r-title">Ausgaben-Kategorien & Budgets</span><span class="r-sub">${catsOf('out').length} Kategorien</span></span>${svg('next')}</button>
         <button type="button" class="row" id="s-cat-in">${catIcon({ color: '#3E8E5E', icon: 'piggy' }, 42)}<span class="grow"><span class="r-title">Einnahme-Quellen</span><span class="r-sub">${catsOf('in').length} Quellen</span></span>${svg('next')}</button>
+        <button type="button" class="row" id="s-people">${catIcon({ color: '#8A5BD6', icon: 'people' }, 42)}<span class="grow"><span class="r-title">Personen</span><span class="r-sub">${S.people.length} ${S.people.length === 1 ? 'Person' : 'Personen'} · Reihenfolge und Initialen</span></span>${svg('next')}</button>
         <button type="button" class="row" id="s-snacks">${catIcon({ color: '#C99A1E', icon: 'croissant' }, 42)}<span class="grow"><span class="r-title">Snacks & Preise</span><span class="r-sub">Für „Snacks antippen“ bei Lidl</span></span>${svg('next')}</button>
       </section>
 
@@ -121,6 +122,7 @@ VIEWS.einstellungen = {
     $('#s-cat-out').onclick = () => go('kategorien/out');
     $('#s-cat-in').onclick = () => go('kategorien/in');
     $('#s-snacks').onclick = () => go('snacks');
+    $('#s-people').onclick = () => go('personen');
     $('#s-news').onclick = () => go('neuigkeiten');
     $('#s-jump').onclick = () => set('jumpHome', st.jumpHome === false);
     $('#s-export').onclick = exportBackup;

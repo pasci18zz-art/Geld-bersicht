@@ -2,8 +2,14 @@
 'use strict';
 
 /* ================= Was ist neu ================= */
-const APP_VERSION = '3.5';
+const APP_VERSION = '3.6';
 const CHANGELOG = [
+  { v: '3.6', title: 'Geplant & Lidl', items: [
+    ['calendar', 'Geplant zeigt alle Rückzahlungen', 'Wieder im gewohnten Stil, mit „Erhalten“. Antippen = auch Teilbeträge.'],
+    ['cart', 'Seite „Lidl“', 'Daneben (umschalten oder wischen): nur was dir jemand aus dem Lidl schuldet, nach Personen.'],
+    ['people', 'Personen', 'In den Einstellungen: Personen anlegen, Reihenfolge festlegen (wer oben steht), Initialen und Farbe ändern.'],
+    ['check', 'Zuordnen geht schneller', 'Einzelne Posten gehen beim Antippen nur an diese Person. Tippst du noch jemanden ein, wird geteilt.']
+  ] },
   { v: '3.5', title: 'Offen bei Geplant, Bon schneller', items: [
     ['calendar', 'Offen ist jetzt bei Geplant', 'Oben zwischen „Geplant“ und „Offen“ umschalten oder von Geplant einfach weiter nach links wischen. Unten sind wieder vier Tabs.'],
     ['receipt', 'Bon lesen viel schneller', 'Jetzt mit der Texterkennung von Google direkt im Handy, ohne Internet. Meist in unter einer Sekunde.']
@@ -235,9 +241,11 @@ function assignSheet(i) {
           <button type="button" class="icon-btn sm" data-asm="${j}" aria-label="Weniger" ${x.w <= 1 ? 'disabled' : ''}>${svg('minus')}</button><span class="as-w">${x.w}</span>
           <button type="button" class="icon-btn sm" data-asp="${j}" aria-label="Mehr">${svg('plus')}</button><span class="as-c">${eur(parts[j].c)}</span></div>`).join('')}</div>` : ''}
         <button type="button" class="btn" id="as-ok">${svg('check')}Fertig</button>`;
+      const multi = /×/.test(l.expr); // mehrere Stück (z. B. 0,89 × 2) → mehrere Personen antippen; sonst nur eine
       $$('[data-as]', el).forEach((b) => b.onclick = () => {
         const n = b.dataset.as; const j = sh.findIndex((x) => x.who === n);
-        if (j >= 0) { if (sh.length > 1) sh.splice(j, 1); } else sh.push({ who: n, w: 1 });
+        if (!multi) sh = [{ who: n, w: 1 }];
+        else if (j >= 0) { if (sh.length > 1) sh.splice(j, 1); } else sh.push({ who: n, w: 1 });
         vibrate(6); draw();
       });
       const nw = $('#as-new', el);
@@ -257,17 +265,39 @@ function assignSheet(i) {
 
 /* ================= Tab „Offen“: wer schuldet mir was ================= */
 const openRefunds = () => S.plans.filter((p) => p.kind === 'refund' && refundLeft(p) > 0);
+/** Aus dem Lidl? (Kategorie Lidl oder Bon/Ausgabe bei Lidl) */
+function isLidl(p) {
+  const c = catById(p.cat);
+  if (p.cat === 'c_lidl' || (c && /^lidl$/i.test(c.name))) return true;
+  const o = p.fromId && (S.tx.find((t) => t.id === p.fromId) || S.plans.find((x) => x.id === p.fromId));
+  return !!(o && /lidl/i.test(o.payee || ''));
+}
+const personByName = (n) => S.people.find((p) => p.name.trim().toLowerCase() === String(n || '').trim().toLowerCase());
+/** Neue Namen automatisch in die Personen-Liste (Einstellungen) aufnehmen */
+function ensurePeople(names) {
+  names.forEach((n) => { n = (n || '').trim(); if (n && !personByName(n)) S.people.push({ id: uid(), name: n, color: COLORS[S.people.length % COLORS.length] }); });
+}
+function initialsOf(name) {
+  const p = personByName(name); if (p && p.ini) return p.ini;
+  const parts = String(name || '?').trim().split(/\s+/);
+  return (parts.length > 1 ? parts[0].charAt(0) + parts[1].charAt(0) : parts[0].charAt(0)).toUpperCase() || '?';
+}
 function openByPerson() {
   const map = new Map();
-  openRefunds().forEach((p) => {
+  openRefunds().filter(isLidl).forEach((p) => {
     const name = (p.payee || '').trim(); const k = name.toLowerCase() || '~';
     if (!map.has(k)) map.set(k, { key: k, name: name || 'Ohne Namen', plans: [], left: 0 });
     const g = map.get(k); g.plans.push(p); g.left += refundLeft(p);
   });
-  return [...map.values()].sort((a, b) => b.left - a.left);
+  const rank = (g) => { const i = S.people.findIndex((p) => p.name.trim().toLowerCase() === g.key); return i < 0 ? 1e6 : i; };
+  return [...map.values()].sort((a, b) => rank(a) - rank(b) || b.left - a.left);
 }
 const AV_COLORS = ['#2F6FD6', '#E8902E', '#8A5BD6', '#1F9E96', '#D6478A', '#4E9B2F', '#C99A1E'];
-const avatarOf = (name, size = 44) => `<span class="avatar" style="background:${AV_COLORS[(Math.abs([...name].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) | 0, 7))) % AV_COLORS.length]};width:${size}px;height:${size}px;font-size:${Math.round(size * 0.42)}px" aria-hidden="true">${esc((name || '?').charAt(0).toUpperCase())}</span>`;
+function avatarOf(name, size = 44) {
+  const p = personByName(name); const ini = initialsOf(name);
+  const col = (p && p.color) || AV_COLORS[Math.abs([...String(name || '?')].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) | 0, 7)) % AV_COLORS.length];
+  return `<span class="avatar" style="background:${col};width:${size}px;height:${size}px;font-size:${Math.round(size * (ini.length > 2 ? 0.3 : ini.length > 1 ? 0.36 : 0.42))}px" aria-hidden="true">${esc(ini)}</span>`;
+}
 /** Wofür? Posten-Namen aus der Ausgabe, sonst Bezeichnung oder Kategorie */
 function refundWhat(p) {
   const owner = p.fromId && (S.tx.find((t) => t.id === p.fromId) || S.plans.find((x) => x.id === p.fromId));
@@ -284,7 +314,7 @@ function refundItemHTML(p, i) {
     <span class="r-amt pos">${money(refundLeft(p), { force: true })}</span></button>`;
 }
 /** Oben umschalten: Geplant | Offen (beides unter dem Tab „Geplant“) */
-const gpSegHTML = (cur) => segHTML([['geplant', 'Geplant'], ['offen', 'Offen']], cur, 'data-gp', 'aria-label="Geplant oder Offen"');
+const gpSegHTML = (cur) => segHTML([['geplant', 'Geplant'], ['offen', 'Lidl']], cur, 'data-gp', 'aria-label="Geplant oder Lidl"');
 function bindGpSeg() {
   $$('[data-gp]').forEach((b) => b.onclick = () => { if (b.dataset.gp === route().name) return; segMove(b); vibrate(6); setTimeout(() => tabTo(b.dataset.gp), 150); });
 }
@@ -293,7 +323,7 @@ VIEWS.offen = {
   html() {
     const groups = openByPerson(); const total = groups.reduce((s, g) => s + g.left, 0);
     return `<div class="page">
-      <header class="hero"><div class="grow"><div class="sub">Bekommst du noch</div><h1>Offen</h1></div>
+      <header class="hero"><div class="grow"><div class="sub">Schuldet dir noch</div><h1>Lidl</h1></div>
         <div class="hero-actions"><button type="button" class="icon-btn glass primary" id="of-add" aria-label="Jemand schuldet mir etwas">${svg('plus')}</button></div></header>
       ${gpSegHTML('offen')}
       ${groups.length ? `<section class="card glass of-total"><span class="small">Insgesamt</span><span class="of-sum">${money(total, { force: true })}</span><span class="small">von ${groups.length} ${groups.length === 1 ? 'Person' : 'Personen'}</span></section>
@@ -303,7 +333,7 @@ VIEWS.offen = {
         ${g.plans.map((p, i) => refundItemHTML(p, i)).join('')}
         <button type="button" class="btn of-get" data-ofget="${esc(g.key)}">${svg('check')}Geld bekommen</button>
       </section>`).join('')}`
-    : `<section class="card glass">${emptyHTML('wallet', 'Gerade schuldet dir niemand etwas.', '<button type="button" class="btn small-btn" id="of-add2">Eintragen, wer dir was schuldet</button>')}</section>`}
+    : `<section class="card glass">${emptyHTML('cart', 'Gerade schuldet dir niemand etwas aus dem Lidl.', '<button type="button" class="btn small-btn" id="of-add2">Eintragen, wer dir was schuldet</button>')}</section>`}
     </div>`;
   },
   mount() {
@@ -342,7 +372,7 @@ function receiveSheet(name, plans) {
           list.forEach((p0) => {
             const p = S.plans.find((x) => x.id === p0.id); if (!p || rest <= 0) return;
             const take = Math.min(rest, refundLeft(p)); if (take <= 0) return;
-            S.tx.push({ id: uid(), kind: 'refund', amount: take, cat: p.cat, title: 'Rückzahlung', payee: p.payee || '', date: todayStr(), ts: Date.now(), acct, month: p.month || curMonth(), planId: p.id });
+            S.tx.push({ id: uid(), kind: 'refund', amount: take, cat: p.cat, title: 'Rückzahlung', payee: p.payee || '', date: todayStr(), ts: Date.now(), acct, month: p.month || curMonth(), planId: p.id, planDue: null, planSnap: planSnap(p) });
             p.paid = (p.paid || 0) + take; rest -= take;
           });
           S.plans = S.plans.filter((p) => !(p.kind === 'refund' && refundLeft(p) <= 0));
@@ -377,9 +407,84 @@ function debtSheet() {
         closeSheet();
         commit(`${name} schuldet dir ${eur(amount)}`, () => {
           S.plans.push({ id: uid(), kind: 'refund', amount, cat: d.cat, title: d.title.trim(), payee: name, date: null, repeat: 'none', acct: 'bar', month: curMonth(), auto: false });
+          ensurePeople([name]);
         });
       };
     };
     draw();
+  });
+}
+
+/* ================= Personen (Reihenfolge, Initialen, Farbe) ================= */
+VIEWS.personen = {
+  nav: null,
+  html() {
+    const left = (n) => openRefunds().filter((p) => (p.payee || '').trim().toLowerCase() === n.trim().toLowerCase()).reduce((s, p) => s + refundLeft(p), 0);
+    return `<div class="page">
+      <div class="topbar-row"><button type="button" class="icon-btn glass" id="back" aria-label="Zurück">${svg('back')}</button><h1 class="center">Personen</h1>
+        <button type="button" class="icon-btn glass" id="pp-add" aria-label="Person hinzufügen">${svg('plus')}</button></div>
+      ${S.people.length ? `<section class="card glass pad-s">${S.people.map((p, i) => { const l = left(p.name); return `<div class="row pers-row" style="--i:${i}">
+        <button type="button" class="pers-main" data-pp="${p.id}">${avatarOf(p.name, 42)}<span class="grow"><span class="r-title ell">${esc(p.name)}</span><span class="r-sub">${l ? 'schuldet dir ' + eur(l) : 'nichts offen'}</span></span></button>
+        <button type="button" class="icon-btn sm" data-ppu="${i}" aria-label="${esc(p.name)} nach oben" ${i === 0 ? 'disabled' : ''}>${svg('up')}</button>
+        <button type="button" class="icon-btn sm" data-ppd="${i}" aria-label="${esc(p.name)} nach unten" ${i === S.people.length - 1 ? 'disabled' : ''}>${svg('down')}</button></div>`; }).join('')}</section>`
+    : `<section class="card glass">${emptyHTML('people', 'Noch keine Personen.', '<button type="button" class="btn small-btn" id="pp-add2">Person hinzufügen</button>')}</section>`}
+    </div>`;
+  },
+  mount() {
+    $('#back').onclick = () => goBack();
+    $('#pp-add').onclick = () => personEditSheet(); if ($('#pp-add2')) $('#pp-add2').onclick = () => personEditSheet();
+    $$('[data-pp]').forEach((b) => b.onclick = () => personEditSheet(b.dataset.pp));
+    const move = (i, d) => { const j = i + d; if (j < 0 || j >= S.people.length) return; vibrate(6); commit('', () => { const a = S.people; [a[i], a[j]] = [a[j], a[i]]; }, { undo: false }); };
+    $$('[data-ppu]').forEach((b) => b.onclick = () => move(+b.dataset.ppu, -1));
+    $$('[data-ppd]').forEach((b) => b.onclick = () => move(+b.dataset.ppd, 1));
+  }
+};
+/** Person bearbeiten; ein neuer Name wird auch in offenen Rückzahlungen und Bons übernommen */
+function personEditSheet(id) {
+  const p = id ? S.people.find((x) => x.id === id) : null;
+  const d = { name: p ? p.name : '', ini: p ? (p.ini || '') : '', color: p ? p.color : COLORS[S.people.length % COLORS.length] };
+  openSheet('<div id="pe-body"></div>', (el) => {
+    const draw = () => {
+      const auto = initialsOf(d.name || '?');
+      $('#pe-body', el).innerHTML = `<div class="cs-head"><span class="avatar" style="background:${d.color};width:58px;height:58px;font-size:${(d.ini || auto).length > 1 ? 20 : 24}px">${esc(d.ini || (d.name ? auto : '?'))}</span><div class="grow"><h2>${p ? 'Person bearbeiten' : 'Neue Person'}</h2></div></div>
+        <label class="field glass">${svg('people')}<span class="sr">Name</span><input id="pe-name" placeholder="Name" value="${esc(d.name)}" maxlength="24" autocomplete="off"></label>
+        <label class="field glass">${svg('tag')}<span class="sr">Initialen</span><input id="pe-ini" placeholder="Initialen (z. B. ${esc(d.name ? auto : 'LM')})" value="${esc(d.ini)}" maxlength="3" autocomplete="off"></label>
+        <div class="swatches">${COLORS.map((c) => `<button type="button" class="swatch${c === d.color ? ' on' : ''}" data-pec="${c}" style="background:${c}" aria-label="Farbe ${c}"></button>`).join('')}</div>
+        <button type="button" class="btn" id="pe-ok">${svg('check')}Speichern</button>
+        ${p ? `<button type="button" class="btn danger" id="pe-del">${svg('trash')}Aus der Liste entfernen</button>` : ''}`;
+      const keep = () => { d.name = $('#pe-name', el).value; d.ini = $('#pe-ini', el).value.toUpperCase(); };
+      $$('[data-pec]', el).forEach((b) => b.onclick = () => { keep(); d.color = b.dataset.pec; draw(); });
+      $('#pe-ini', el).addEventListener('input', (e) => { const a = $('.cs-head .avatar', el); if (a) a.textContent = e.target.value.toUpperCase() || initialsOf($('#pe-name', el).value || '?'); });
+      $('#pe-ok', el).onclick = () => {
+        keep(); const name = d.name.trim();
+        if (!name) { $('#pe-name', el).focus(); return; }
+        const other = personByName(name);
+        if (other && other !== p) { toast(name + ' gibt es schon'); return; }
+        closeSheet();
+        commit(p ? 'Gespeichert' : name + ' hinzugefügt', () => {
+          if (p) {
+            const old = p.name.trim().toLowerCase();
+            if (old !== name.toLowerCase()) renamePerson(old, name);
+            Object.assign(p, { name, ini: d.ini.trim().slice(0, 3), color: d.color });
+            if (!p.ini) delete p.ini;
+          } else {
+            const np = { id: uid(), name, color: d.color }; if (d.ini.trim()) np.ini = d.ini.trim().slice(0, 3);
+            S.people.push(np);
+          }
+        });
+      };
+      if (p) $('#pe-del', el).onclick = () => { closeSheet(); commit(p.name + ' entfernt', () => { S.people = S.people.filter((x) => x !== p); }); };
+    };
+    draw();
+    if (!p) setTimeout(() => { const i = $('#pe-name', el); if (i) i.focus(); }, 80);
+  });
+}
+function renamePerson(oldLower, name) {
+  const is = (n) => String(n || '').trim().toLowerCase() === oldLower;
+  S.plans.forEach((p) => { if (p.kind === 'refund' && is(p.payee)) p.payee = name; });
+  S.tx.forEach((t) => { if (t.kind === 'refund' && is(t.payee)) t.payee = name; });
+  S.tx.concat(S.plans).forEach((o) => {
+    (o.backs || []).forEach((b) => { if (is(b.who)) b.who = name; });
+    (o.lines || []).forEach((l) => (l.shares || []).forEach((x) => { if (is(x.who)) x.who = name; }));
   });
 }

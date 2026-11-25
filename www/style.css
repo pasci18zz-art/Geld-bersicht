@@ -798,3 +798,9 @@ button.ln-amt small { margin-right: 6px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .ln.live + .ln-who { margin-top: 4px; }
 .busy-x { margin-left: 6px; }
+
+/* v3.6: Personen */
+.pers-row { display: flex; align-items: center; gap: 4px; padding-right: 2px; }
+.pers-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; border: none; background: none; color: var(--text); text-align: left; padding: 6px 0; }
+.pers-main .grow { display: flex; flex-direction: column; min-width: 0; }
+.icon-btn.sm[disabled] { opacity: .3; }

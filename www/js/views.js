@@ -422,7 +422,7 @@ function planRowHTML(p, i, compact) {
       <div class="r-sub">${p.kind === 'refund' ? `${svg('undo')} ${esc(c.name)} · ` : p.payee ? (isIn ? 'von ' : 'an ') + esc(p.payee) + ' · ' : ''}<span class="due">${dueLabel(p.date)}</span>${p.repeat === 'monthly' ? ` · <span class="tag-mini">${svg('repeat')}monatlich</span>` : ''}</div>
     </div>
     <div class="plan-side">
-      <span class="r-amt ${isIn ? 'pos' : 'neg'}">${money(p.amount, { sign: isIn ? '+' : '-' })}</span>
+      <span class="r-amt ${isIn ? 'pos' : 'neg'}">${money(p.kind === 'refund' ? refundLeft(p) : p.amount, { sign: isIn ? '+' : '-' })}</span>
       <div class="plan-btns">
         ${compact ? '' : `<button type="button" class="pbtn more" data-pmore="${p.id}" aria-label="Mehr">${svg('dots')}</button>`}
         <button type="button" class="pbtn ok" data-pok="${p.id}" aria-label="${esc(p.title || c.name)} bestätigen">${svg('check')}<span>${isIn ? 'Erhalten' : 'Bezahlt'}</span></button>
@@ -468,12 +468,16 @@ function planMoreSheet(id) {
 function bindPlanRows(root = document) {
   $$('[data-pok]', root).forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); confirmPlan(b.dataset.pok, b); }));
   $$('[data-pmore]', root).forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); planMoreSheet(b.dataset.pmore); }));
-  $$('[data-plan]', root).forEach((c) => c.addEventListener('click', () => go('neu/p' + c.dataset.plan)));
+  $$('[data-plan]', root).forEach((c) => c.addEventListener('click', () => {
+    const p = S.plans.find((x) => x.id === c.dataset.plan);
+    if (p && p.kind === 'refund') receiveSheet(p.payee || 'Ohne Namen', [p]); // Rückzahlung: auch Teilbeträge
+    else go('neu/p' + c.dataset.plan);
+  }));
 }
 VIEWS.geplant = {
   nav: 'geplant',
   html() {
-    const list = S.plans.filter((p) => p.kind !== 'refund').sort(planOrder);
+    const list = S.plans.filter((p) => p.kind !== 'refund' || refundLeft(p) > 0).sort(planOrder);
     const bal = balance(); const sum = planSum();
     const done = doneList();
     return `<div class="page">
@@ -507,7 +511,7 @@ VIEWS.geplant = {
 let doneOpen = false;
 function doneList() {
   const from = addDays(todayStr(), -7);
-  return S.tx.filter((t) => t.planId && t.kind !== 'refund' && !t.doneHidden && t.date >= from).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  return S.tx.filter((t) => t.planId && !t.doneHidden && t.date >= from).sort((a, b) => (b.ts || 0) - (a.ts || 0));
 }
 function doneRowHTML(t, i) {
   const c = catById(t.cat); const isIn = t.kind !== 'out';
@@ -524,6 +528,7 @@ function restorePlan(txId) {
     const due = t.planDue !== undefined ? t.planDue : t.date;
     const p = S.plans.find((x) => x.id === t.planId);
     // Automatische Monatsbuchung: nur dieses Mal als einmalige, manuelle Buchung zurücklegen
+    if (p && t.kind === 'refund') { p.paid = Math.max(0, (p.paid || 0) - t.amount); return; }
     if (p && !(p.auto && p.repeat === 'monthly')) { if (due && due < p.date) p.date = due; return; }
     const sn = t.planSnap || { kind: t.kind, amount: t.amount, cat: t.cat, title: t.title, payee: t.payee, acct: acctOf(t), repeat: 'none' };
     S.plans.push(Object.assign({ id: p ? uid() : t.planId, date: due }, sn, p ? { repeat: 'none' } : {}, { auto: false }));
@@ -596,8 +601,8 @@ function nameSuggest(pool, val, exclude = []) {
     .sort((a, b) => (b.toLowerCase().startsWith(v) ? 1 : 0) - (a.toLowerCase().startsWith(v) ? 1 : 0)).slice(0, 4);
 }
 const recentTx = () => S.tx.slice().sort((a, b) => b.date.localeCompare(a.date) || (b.ts || 0) - (a.ts || 0));
-const personPool = () => recentTx().filter((t) => t.kind === 'refund').map((t) => t.payee)
-  .concat(recentTx().flatMap((t) => (t.backs || []).map((b) => b.who)), S.plans.filter((p) => p.kind === 'refund').map((p) => p.payee), S.people.map((p) => p.name));
+const personPool = () => S.people.map((p) => p.name).concat(recentTx().filter((t) => t.kind === 'refund').map((t) => t.payee))
+  .concat(recentTx().flatMap((t) => (t.backs || []).map((b) => b.who)), S.plans.filter((p) => p.kind === 'refund').map((p) => p.payee));
 const payeePool = () => (F.kind === 'refund' ? personPool() : recentTx().filter((t) => t.kind === F.kind).map((t) => t.payee));
 const suggHTML = (list, attr) => list.map((n) => `<button type="button" class="sg" ${attr}="${esc(n)}">${esc(n)}</button>`).join('');
 
@@ -905,7 +910,7 @@ function saveEntry(btn) {
         if (F.kind !== 'refund') delete owner.month; if (F.kind !== 'transfer') delete owner.to; if (!lines) delete owner.lines;
       } else { owner = Object.assign({ id: uid(), ts: Date.now() }, data); S.tx.push(owner); }
     }
-    if (isOut) syncBacks(owner, F.backs, F.cat, monthOf(F.date || todayStr()));
+    if (isOut) { syncBacks(owner, F.backs, F.cat, monthOf(F.date || todayStr())); ensurePeople(F.backs.map((b) => b.who)); }
     else if (owner.backs) { syncBacks(owner, [], F.cat, curMonth()); }
   }, { after: () => { if (!isPlan) bKey = keyFor(bKey[0], F.date); goBack(); } });
 }
